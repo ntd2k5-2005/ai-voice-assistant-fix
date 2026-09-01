@@ -65,6 +65,9 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
     this.rebufferCount = 0;
     this.callbackCount = 0;
     this.drainedSent = false;
+    this.chunkSpans = [];
+    this.cumulativeAcceptedFrames = 0;
+    this.cumulativeConsumedFrames = 0;
 
     this.port.onmessage = (event) => {
       const msg = event.data || {};
@@ -79,6 +82,16 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
         const samples = new Float32Array(aligned / 2);
         for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
         this.ring.push(samples);
+        const sequence = Number(msg.sequence || 0);
+        this.chunkSpans.push({sequence, remaining: samples.length, started: false});
+        this.cumulativeAcceptedFrames += samples.length;
+        this.port.postMessage({
+          type: "accepted",
+          sequence,
+          acceptedFrames: samples.length,
+          bufferedFrames: this.ring.size,
+          cumulativeAcceptedFrames: this.cumulativeAcceptedFrames,
+        });
       } else if (msg.type === "end") {
         this.ended = true;
       } else if (msg.type === "reset") {
@@ -92,6 +105,9 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
         this.maxUnderrunFrames = 0;
         this.rebufferCount = 0;
         this.drainedSent = false;
+        this.chunkSpans = [];
+        this.cumulativeAcceptedFrames = 0;
+        this.cumulativeConsumedFrames = 0;
       }
     };
   }
@@ -109,7 +125,30 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
       playing: this.playing,
       startedOnce: this.startedOnce,
       ended: this.ended,
+      cumulativeAcceptedFrames: this.cumulativeAcceptedFrames,
+      cumulativeConsumedFrames: this.cumulativeConsumedFrames,
     });
+  }
+
+  _consumeSpans(frameCount) {
+    let remaining = frameCount;
+    while (remaining > 0 && this.chunkSpans.length) {
+      const span = this.chunkSpans[0];
+      if (!span.started) {
+        span.started = true;
+        this.port.postMessage({
+          type: "consuming",
+          sequence: span.sequence,
+          bufferedFrames: this.ring.size,
+          cumulativeConsumedFrames: this.cumulativeConsumedFrames,
+        });
+      }
+      const take = Math.min(remaining, span.remaining);
+      span.remaining -= take;
+      remaining -= take;
+      this.cumulativeConsumedFrames += take;
+      if (span.remaining === 0) this.chunkSpans.shift();
+    }
   }
 
   process(_inputs, outputs) {
@@ -155,6 +194,7 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
     }
 
     const written = this.ring.popInto(out);
+    this._consumeSpans(written);
     const missing = out.length - written;
     if (missing > 0 && !this.ended) {
       if (this.currentUnderrunFrames === 0) {

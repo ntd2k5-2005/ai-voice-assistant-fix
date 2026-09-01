@@ -4,6 +4,7 @@ import queue
 import statistics
 import threading
 import time
+import uuid
 from collections.abc import Iterator, Sequence
 from pathlib import Path
 from typing import Any
@@ -48,6 +49,7 @@ class V10MediaPipeline:
         voice_index: int | None = None,
     ) -> Iterator[dict[str, Any]]:
         started = time.perf_counter()
+        trace_id = uuid.uuid4().hex
 
         def rel_ms() -> float:
             return (time.perf_counter() - started) * 1000.0
@@ -126,6 +128,10 @@ class V10MediaPipeline:
             "max_control_queue_depth": 0,
             "max_speech_spool_depth": 0,
             "llm_meta": {},
+            "producer_audio_ms": 0.0,
+            "min_producer_lead_ms": None,
+            "pcm_trace": [],
+            "max_media_queue_wait_ms": 0.0,
         }
 
         def put_control(event: dict[str, Any]) -> None:
@@ -133,6 +139,11 @@ class V10MediaPipeline:
             shared["max_control_queue_depth"] = max(shared["max_control_queue_depth"], control_q.qsize())
 
         def put_media(event: dict[str, Any] | None) -> None:
+            if isinstance(event, dict) and event.get("type") == "pcm":
+                event["trace_id"] = trace_id
+                event["t3_media_enqueue_ns"] = time.time_ns()
+                event["t3_media_enqueue_ms"] = rel_ms()
+                event["media_queue_depth_at_enqueue"] = media_q.qsize()
             before = time.perf_counter()
             media_q.put(event)
             shared["media_queue_backpressure_ms"] += (time.perf_counter() - before) * 1000.0
@@ -250,7 +261,12 @@ class V10MediaPipeline:
                     streaming_mode = "unknown"
                     profile = "unknown"
                     upstream_commit = "unknown"
-                    for tts_event in self.core.tts.stream_native_pcm(task.text, voice_index=voice):
+                    for tts_event in self.core.tts.stream_native_pcm(
+                        task.text,
+                        voice_index=voice,
+                        trace_id=trace_id,
+                        unit_index=task.index,
+                    ):
                         if tts_event.get("type") == "audio":
                             now_ms = rel_ms()
                             if first_pcm_ms is None:
@@ -271,24 +287,46 @@ class V10MediaPipeline:
                             chunk_count += 1
                             shared["stream_chunk_count"] += 1
                             audio_ms += duration_ms
+                            shared["producer_audio_ms"] += duration_ms
+                            generation_elapsed_ms = (
+                                now_ms - float(shared["first_tts_request_ms"] or now_ms)
+                            )
+                            producer_lead_ms = shared["producer_audio_ms"] - generation_elapsed_ms
+                            prior_min_lead = shared["min_producer_lead_ms"]
+                            shared["min_producer_lead_ms"] = (
+                                producer_lead_ms
+                                if prior_min_lead is None
+                                else min(float(prior_min_lead), producer_lead_ms)
+                            )
                             final_pcm_parts.append(raw)
                             backend = str(tts_event.get("upstream_backend") or backend)
                             streaming_mode = str(tts_event.get("streaming_mode") or streaming_mode)
                             profile = str(tts_event.get("profile") or profile)
                             upstream_commit = str(tts_event.get("upstream_commit") or upstream_commit)
-                            put_media({
+                            trace = dict(tts_event.get("trace") or {})
+                            pcm_event = {
                                 "type": "pcm",
                                 "raw": raw,
                                 "duration_ms": duration_ms,
                                 "unit_index": task.index,
                                 "chunk_index": shared["stream_chunk_count"],
                                 "unit_chunk_index": chunk_count,
+                                "frame_count": int(
+                                    tts_event.get("frame_count") or len(raw) // 4
+                                ),
                                 "server_arrival_ms": now_ms,
+                                "t0_model_yield_ns": trace.get("t0_model_yield_ns"),
+                                "t1_service_yield_ns": trace.get("t1_service_yield_ns"),
+                                "t2_client_receive_ns": trace.get("t2_client_receive_ns"),
+                                "producer_cumulative_audio_ms": shared["producer_audio_ms"],
+                                "producer_elapsed_ms": generation_elapsed_ms,
+                                "producer_lead_ms": producer_lead_ms,
                                 "backend": backend,
                                 "streaming_mode": streaming_mode,
                                 "profile": profile,
                                 "upstream_commit": upstream_commit,
-                            })
+                            }
+                            put_media(pcm_event)
                         elif tts_event.get("type") == "done":
                             terminal = dict(tts_event)
 
@@ -350,6 +388,18 @@ class V10MediaPipeline:
                 if media is None:
                     media_source_done = True
                 elif media != "__empty__":
+                    media["pipeline_yield_ns"] = time.time_ns()
+                    queue_wait_ms = (
+                        media["pipeline_yield_ns"] - media["t3_media_enqueue_ns"]
+                    ) / 1_000_000.0
+                    media["media_queue_wait_ms"] = queue_wait_ms
+                    shared["max_media_queue_wait_ms"] = max(
+                        shared["max_media_queue_wait_ms"], queue_wait_ms
+                    )
+                    shared["pcm_trace"].append({
+                        key: value for key, value in media.items()
+                        if key != "raw"
+                    })
                     yield media
 
             if (
@@ -374,6 +424,9 @@ class V10MediaPipeline:
 
         gaps = list(shared["inter_pcm_gaps_ms"])
         rtfs = [float(x["rtf"]) for x in unit_metrics if x.get("rtf") is not None]
+        total_synthesis_ms = sum(float(x["synthesis_ms"]) for x in unit_metrics)
+        total_audio_ms = sum(float(x["audio_duration_ms"]) for x in unit_metrics)
+        aggregate_rtf = total_synthesis_ms / total_audio_ms if total_audio_ms > 0 else None
         p95_gap = None
         if gaps:
             p95_gap = gaps[0] if len(gaps) == 1 else statistics.quantiles(gaps, n=20, method="inclusive")[18]
@@ -385,7 +438,7 @@ class V10MediaPipeline:
             "control_transport": "websocket",
             "segmentation_mode": "phase-adaptive-semantic-speech-units",
             "generation_strategy": "locked-vieneu-onnx-native-stream",
-            "media_transport": "single-http-raw-pcm-stream",
+            "media_transport": "binary-websocket-pcm-v1",
             "playout_owner": "browser-audioworklet-rebuffering-ring-buffer",
             "server_playout_buffering": False,
             "server_browser_clock_estimation": False,
@@ -412,6 +465,17 @@ class V10MediaPipeline:
             "media_queue_capacity": self.settings.tts_audio_queue_max,
             "max_media_queue_depth": shared["max_media_queue_depth"],
             "media_queue_backpressure_ms": shared["media_queue_backpressure_ms"],
+            "max_media_queue_wait_ms": shared["max_media_queue_wait_ms"],
+            "producer_cumulative_audio_ms": shared["producer_audio_ms"],
+            "min_producer_lead_ms": shared["min_producer_lead_ms"],
+            "producer_throughput_status": (
+                "insufficient"
+                if aggregate_rtf is not None and aggregate_rtf >= 1.0
+                else "headroom-observed"
+                if aggregate_rtf is not None and aggregate_rtf < 1.0
+                else "unknown"
+            ),
+            "aggregate_rtf": aggregate_rtf,
             "first_speech_unit_queued_ms": shared["first_unit_queued_ms"],
             "pipeline_first_tts_request_ms": shared["first_tts_request_ms"],
             "pipeline_first_tts_pcm_ms": first_pcm_ms,
@@ -427,6 +491,7 @@ class V10MediaPipeline:
             "p95_inter_pcm_gap_ms": p95_gap,
             "final_audio_path": final_audio_path,
             "units": unit_metrics,
+            "pcm_trace": shared["pcm_trace"],
         }
         yield {"type": "tts_done", "meta": tts_meta, "final_audio": final_audio_path}
 

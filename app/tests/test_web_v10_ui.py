@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import json
 import shutil
 import subprocess
 from pathlib import Path
@@ -38,8 +39,8 @@ def test_legacy_broken_tab_selectors_are_gone():
 
 
 def test_frontend_assets_use_cache_busting():
-    assert "/assets/app.js?v=10-rebuild-1" in HTML
-    assert "/assets/style.css?v=10-rebuild-1" in HTML
+    assert "/assets/app.js?v=10-rebuild-2" in HTML
+    assert "/assets/style.css?v=10-rebuild-2" in HTML
     assert "pcm-player-worklet.js?${ASSET_VERSION}" in APP_JS
 
 
@@ -79,3 +80,92 @@ player.process([], [[new Float32Array(128)]]);
 if (!player.port.messages.some((msg) => msg.type === 'drained')) process.exit(2);
 """
     subprocess.run([node, "-e", harness], check=True, capture_output=True, text=True)
+
+
+def test_worklet_synthetic_playout_regressions():
+    """Exercise the real worklet for fast, realtime, bursty and slow producers."""
+    node = shutil.which("node")
+    if not node:
+        pytest.skip("node is not installed")
+    harness = f"""
+const fs = require('fs');
+const vm = require('vm');
+global.sampleRate = 48000;
+global.AudioWorkletProcessor = class {{
+  constructor() {{
+    this.port = {{
+      onmessage: null,
+      messages: [],
+      postMessage(msg) {{ this.messages.push(msg); }}
+    }};
+  }}
+}};
+global.registerProcessor = (_name, cls) => {{ global.WorkletClass = cls; }};
+vm.runInThisContext(fs.readFileSync({str(WORKLET_JS)!r}, 'utf8'));
+
+function run(name, intervalMs, chunkMs, count) {{
+  const player = new global.WorkletClass();
+  player.port.onmessage({{data: {{type: 'config', prebufferMs: 700, rebufferMs: 900}}}});
+  const arrivals = [];
+  for (let i = 0; i < count; i++) arrivals.push({{at: i * intervalMs, frames: Math.round(48000 * chunkMs / 1000), seq: i + 1}});
+  let next = 0;
+  let ended = false;
+  let nowMs = 0;
+  const quantumMs = 128 / 48000 * 1000;
+  for (let callback = 0; callback < 20000; callback++) {{
+    while (next < arrivals.length && arrivals[next].at <= nowMs + 1e-7) {{
+      const item = arrivals[next++];
+      const buffer = new ArrayBuffer(item.frames * 2);
+      player.port.onmessage({{data: {{type: 'pcm', buffer, sequence: item.seq, frameCount: item.frames}}}});
+    }}
+    if (!ended && next === arrivals.length && nowMs >= arrivals[arrivals.length - 1].at) {{
+      ended = true;
+      player.port.onmessage({{data: {{type: 'end'}}}});
+    }}
+    player.process([], [[new Float32Array(128)]]);
+    nowMs += quantumMs;
+    if (player.port.messages.some(msg => msg.type === 'drained')) break;
+  }}
+  const consumedSeq = player.port.messages.filter(msg => msg.type === 'consuming').map(msg => msg.sequence);
+  const producedAudioMs = count * chunkMs;
+  const productionElapsedMs = (count - 1) * intervalMs;
+  const rate = producedAudioMs / productionElapsedMs;
+  return {{
+    name,
+    rate,
+    status: rate < 1 ? 'insufficient' : 'headroom-observed',
+    underruns: player.underrunCount,
+    accepted: player.cumulativeAcceptedFrames,
+    consumed: player.cumulativeConsumedFrames,
+    consumedSeq,
+    drained: player.port.messages.some(msg => msg.type === 'drained'),
+    ringSize: player.ring.size,
+    spanCount: player.chunkSpans.length,
+  }};
+}}
+
+const rows = [
+  run('faster', 100, 200, 50),
+  run('realtime', 100, 100, 100),
+  run('bursty-headroom', 800, 1000, 10),
+  run('slower', 100, 80, 100),
+];
+process.stdout.write(JSON.stringify(rows));
+"""
+    result = subprocess.run(
+        [node, "-e", harness], check=True, capture_output=True, text=True
+    )
+    rows = {row["name"]: row for row in json.loads(result.stdout)}
+
+    for name in ("faster", "realtime", "bursty-headroom"):
+        assert rows[name]["underruns"] == 0, rows[name]
+        assert rows[name]["status"] == "headroom-observed"
+
+    assert rows["slower"]["underruns"] > 0
+    assert rows["slower"]["status"] == "insufficient"
+
+    for row in rows.values():
+        assert row["drained"] is True
+        assert row["accepted"] == row["consumed"]
+        assert row["ringSize"] == 0 and row["spanCount"] == 0
+        assert row["consumedSeq"] == list(range(1, len(row["consumedSeq"]) + 1))

@@ -4,6 +4,7 @@ import asyncio
 import json
 import queue
 import shutil
+import struct
 import tempfile
 import threading
 import time
@@ -23,12 +24,46 @@ from .media_v10 import V10MediaPipeline
 from .orchestrator import VoiceOrchestrator
 
 
+PCM_WS_MAGIC = b"V10P"
+PCM_WS_VERSION = 1
+PCM_WS_HEADER = struct.Struct("<4sHHIIIIQQQQQQ")
+
+
+@dataclass
+class AudioPacket:
+    raw: bytes
+    meta: dict[str, Any]
+
+
+def encode_pcm_websocket_packet(packet: AudioPacket, *, sent_ns: int | None = None) -> bytes:
+    """Encode one ordered PCM16 chunk with its end-to-end trace header."""
+    meta = packet.meta
+    t5_ns = sent_ns or time.time_ns()
+    meta["t5_websocket_send_ns"] = t5_ns
+    header = PCM_WS_HEADER.pack(
+        PCM_WS_MAGIC,
+        PCM_WS_VERSION,
+        PCM_WS_HEADER.size,
+        int(meta.get("chunk_index") or 0),
+        int(meta.get("unit_index") or 0),
+        int(meta.get("unit_chunk_index") or 0),
+        int(meta.get("frame_count") or len(packet.raw) // 2),
+        int(meta.get("t0_model_yield_ns") or 0),
+        int(meta.get("t1_service_yield_ns") or 0),
+        int(meta.get("t2_client_receive_ns") or 0),
+        int(meta.get("t3_media_enqueue_ns") or 0),
+        int(meta.get("t4_web_audio_enqueue_ns") or 0),
+        t5_ns,
+    )
+    return header + packet.raw
+
+
 @dataclass
 class TurnSession:
     turn_id: str
     created_at: float
     event_queue: queue.Queue[dict[str, Any]] = field(default_factory=queue.Queue)
-    audio_queue: queue.Queue[bytes | None] = field(default_factory=queue.Queue)
+    audio_queue: queue.Queue[AudioPacket | None] = field(default_factory=queue.Queue)
     finished: threading.Event = field(default_factory=threading.Event)
     final_audio: str | None = None
     browser_metrics: dict[str, Any] = field(default_factory=dict)
@@ -89,13 +124,17 @@ class TurnManager:
                 ):
                     if event.get("type") == "pcm":
                         pcm16 = self._pcm_float32_to_int16(event["raw"])
+                        packet_meta = {k: v for k, v in event.items() if k != "raw"}
+                        packet_meta["t4_web_audio_enqueue_ns"] = time.time_ns()
+                        packet_meta["web_audio_queue_depth_at_enqueue"] = session.audio_queue.qsize()
+                        packet_meta["frame_count"] = len(pcm16) // 2
                         # V10 web boundary is intentionally non-blocking for control:
                         # a slow browser audio reader must not delay WebSocket events.
                         # Turn length is bounded by LLM_MAX_TOKENS, so this per-turn
                         # queue is finite in practice; the TTS/media worker remains
                         # single-threaded and bounded upstream.
-                        session.audio_queue.put_nowait(pcm16)
-                        session.event_queue.put({k: v for k, v in event.items() if k != "raw"})
+                        session.audio_queue.put_nowait(AudioPacket(pcm16, packet_meta))
+                        session.event_queue.put(packet_meta)
                     else:
                         if event.get("type") == "tts_done":
                             session.final_audio = event.get("final_audio")
@@ -133,6 +172,12 @@ class BrowserMetrics(BaseModel):
     min_buffer_ahead_ms: float | None = None
     max_buffer_ahead_ms: float | None = None
     final_buffer_ahead_ms: float | None = None
+    media_transport: str = "binary-websocket-pcm-v1"
+    pcm_sequence_errors: int = 0
+    max_browser_receive_gap_ms: float = 0.0
+    producer_rate: float | None = None
+    producer_throughput_status: str | None = None
+    pcm_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
 def _safe_filename(name: str | None, fallback: str) -> str:
@@ -163,7 +208,7 @@ def create_app():
             "status": "ok",
             "pipeline": "v10",
             "control_transport": "websocket",
-            "media_transport": "raw-http-pcm",
+            "media_transport": "binary-websocket-pcm-v1",
             "playout": "browser-audioworklet-rebuffering-ring-buffer",
         }
 
@@ -174,7 +219,7 @@ def create_app():
         warmup = tts.get("warmup") or {}
         result["v10"] = {
             "control_transport": "websocket",
-            "media_transport": "single-http-raw-pcm-stream",
+            "media_transport": "binary-websocket-pcm-v1",
             "playout_owner": "browser-audioworklet-rebuffering-ring-buffer",
             "browser_prebuffer_ms": settings.browser_audio_prebuffer_ms,
             "browser_rebuffer_ms": settings.browser_audio_rebuffer_ms,
@@ -198,7 +243,7 @@ def create_app():
             "prebuffer_ms": settings.browser_audio_prebuffer_ms,
             "rebuffer_ms": settings.browser_audio_rebuffer_ms,
             "control_transport": "websocket",
-            "media_transport": "raw-pcm16",
+            "media_transport": "binary-websocket-pcm-v1",
         }
 
     @app.post("/api/turn/text")
@@ -269,7 +314,7 @@ def create_app():
                 chunk = session.audio_queue.get()
                 if chunk is None:
                     return
-                yield chunk
+                yield chunk.raw
 
         return StreamingResponse(
             source(), media_type="application/octet-stream",
@@ -279,6 +324,36 @@ def create_app():
                 "X-Audio-Dtype": "int16", "X-Media-Plane": "audioworklet-raw-pcm-v10",
             },
         )
+
+    @app.websocket("/ws/turn/{turn_id}/audio")
+    async def turn_audio_websocket(websocket: WebSocket, turn_id: str):
+        """Framed PCM media plane with observable per-chunk delivery.
+
+        Each binary message is one application PCM chunk with its sequence and
+        T0-T5 timestamps. WebSocket message boundaries survive intermediaries;
+        measured latency can therefore be attributed without guessing how an
+        unframed StreamingResponse body was split or coalesced.
+        """
+        try:
+            session = manager.get(turn_id)
+        except KeyError:
+            await websocket.close(code=4404, reason="Unknown turn")
+            return
+        await websocket.accept()
+        try:
+            while True:
+                packet = await asyncio.to_thread(session.audio_queue.get)
+                if packet is None:
+                    await websocket.send_json({"type": "end"})
+                    break
+                await websocket.send_bytes(encode_pcm_websocket_packet(packet))
+        except WebSocketDisconnect:
+            return
+        finally:
+            try:
+                await websocket.close()
+            except Exception:
+                pass
 
     @app.post("/api/turn/{turn_id}/browser-metrics")
     def browser_metrics(turn_id: str, metrics: BrowserMetrics):

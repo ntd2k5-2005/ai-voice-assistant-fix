@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 import api
-from api import iter_model_audio
+from api import iter_model_audio, iter_model_audio_traced
 
 
 def test_iter_model_audio_auto_uses_native_stream(monkeypatch):
@@ -25,6 +25,26 @@ def test_iter_model_audio_auto_uses_native_stream(monkeypatch):
         )
     )
     assert [chunk.size for chunk in chunks] == [120, 80]
+
+
+def test_traced_iterator_marks_each_native_model_yield(monkeypatch):
+    class FakeModel:
+        def infer_stream(self, **kwargs):
+            yield np.ones(12, dtype=np.float32)
+            yield np.ones(8, dtype=np.float32)
+
+    monkeypatch.setattr(api, "model", FakeModel())
+    monkeypatch.setattr(api, "FORCE_BLOCKING", False)
+    rows = list(
+        iter_model_audio_traced(
+            "Xin chào",
+            selected_voice={"voice": "x"},
+            pre_chunked=True,
+            generation_mode="stream",
+        )
+    )
+    assert [samples.size for samples, _ in rows] == [12, 8]
+    assert all(isinstance(yield_ns, int) and yield_ns > 0 for _, yield_ns in rows)
 
 
 def test_sentence_mode_remains_explicit_compatibility_path(monkeypatch):

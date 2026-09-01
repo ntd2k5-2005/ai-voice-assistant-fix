@@ -1,10 +1,11 @@
-const ASSET_VERSION = "v10-rebuild-1";
+const ASSET_VERSION = "v10-rebuild-2";
 const $ = (id) => document.getElementById(id);
 
 let audioCtx = null;
 let pcmNode = null;
 let currentTurn = null;
 let currentControlSocket = null;
+let currentAudioSocket = null;
 let turnStartedAt = 0;
 let prebufferMs = 700;
 let rebufferMs = 900;
@@ -14,6 +15,7 @@ let micChunks = [];
 let lastRawMetrics = {};
 let serverTurnDone = false;
 let turnBusy = false;
+let pcmTraceBySequence = new Map();
 
 const browserMetrics = () => ({
   first_pcm_received_ms: null,
@@ -27,6 +29,12 @@ const browserMetrics = () => ({
   min_buffer_ahead_ms: null,
   max_buffer_ahead_ms: null,
   final_buffer_ahead_ms: null,
+  media_transport: "binary-websocket-pcm-v1",
+  pcm_sequence_errors: 0,
+  max_browser_receive_gap_ms: 0,
+  producer_rate: null,
+  producer_throughput_status: null,
+  pcm_trace: [],
 });
 let bm = browserMetrics();
 
@@ -86,6 +94,7 @@ function setTurnBusy(value) {
 
 function resetPlayback() {
   bm = browserMetrics();
+  pcmTraceBySequence = new Map();
   setText("bufferAhead", "0 ms");
   const bar = $("bufferBar");
   if (bar) bar.style.width = "0%";
@@ -137,6 +146,15 @@ function handleWorkletMessage(msg) {
     setStatus("🔊 Đã đủ đệm · tiếp tục phát…", "talking");
   }
 
+  if (msg.type === "accepted" || msg.type === "consuming") {
+    const row = pcmTraceBySequence.get(Number(msg.sequence));
+    if (row) {
+      if (msg.type === "accepted") row.t8_worklet_accepted_ms = nowTurnMs();
+      else row.t9_consumption_started_ms = nowTurnMs();
+      row.worklet_buffered_frames = Number(msg.bufferedFrames || 0);
+    }
+  }
+
   if (["metrics", "started", "rebuffering", "resumed"].includes(msg.type)) {
     const frames = Number(msg.bufferedFrames || 0);
     const aheadMs = frames / audioCtx.sampleRate * 1000;
@@ -171,49 +189,115 @@ async function streamAudio(turnId, sampleRate) {
   await ensureAudioWorklet(sampleRate);
   pcmNode.port.postMessage({ type: "config", prebufferMs, rebufferMs });
 
-  const resp = await fetch(`/api/turn/${encodeURIComponent(turnId)}/audio`, {
-    cache: "no-store",
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  const url = `${scheme}://${location.host}/ws/turn/${encodeURIComponent(turnId)}/audio`;
+  let expectedSequence = 1;
+  let previousReceiveMs = null;
+  let cumulativeFrames = 0;
+  let firstProducerNs = null;
+  let latestProducerNs = null;
+
+  await new Promise((resolve, reject) => {
+    const ws = new WebSocket(url);
+    currentAudioSocket = ws;
+    ws.binaryType = "arraybuffer";
+    let ended = false;
+
+    ws.onmessage = (event) => {
+      if (typeof event.data === "string") {
+        let message;
+        try { message = JSON.parse(event.data); }
+        catch (err) { reject(err); return; }
+        if (message.type === "end") {
+          ended = true;
+          pcmNode.port.postMessage({ type: "end" });
+          ws.close(1000);
+          resolve();
+        }
+        return;
+      }
+
+      const receivedMs = nowTurnMs();
+      const buffer = event.data;
+      if (!(buffer instanceof ArrayBuffer) || buffer.byteLength < 72) {
+        reject(new Error("Khung PCM WebSocket không hợp lệ"));
+        return;
+      }
+      const view = new DataView(buffer);
+      const magic = String.fromCharCode(
+        view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3)
+      );
+      const version = view.getUint16(4, true);
+      const headerBytes = view.getUint16(6, true);
+      if (magic !== "V10P" || version !== 1 || headerBytes < 72 || headerBytes > buffer.byteLength) {
+        reject(new Error("Sai protocol PCM WebSocket"));
+        return;
+      }
+
+      const sequence = view.getUint32(8, true);
+      const unitIndex = view.getUint32(12, true);
+      const unitChunkIndex = view.getUint32(16, true);
+      const frameCount = view.getUint32(20, true);
+      const stageNs = [];
+      for (let offset = 24; offset <= 64; offset += 8) stageNs.push(view.getBigUint64(offset, true));
+      if (sequence !== expectedSequence) bm.pcm_sequence_errors += 1;
+      expectedSequence = sequence + 1;
+      const payload = buffer.slice(headerBytes);
+      if (payload.byteLength !== frameCount * 2) {
+        reject(new Error(`PCM frame ${sequence} sai kích thước`));
+        return;
+      }
+
+      if (bm.first_pcm_received_ms === null) {
+        bm.first_pcm_received_ms = receivedMs;
+        setText("mBrowserPcm", fmtMs(receivedMs));
+      }
+      const arrivalGapMs = previousReceiveMs === null ? 0 : receivedMs - previousReceiveMs;
+      previousReceiveMs = receivedMs;
+      bm.max_browser_receive_gap_ms = Math.max(bm.max_browser_receive_gap_ms, arrivalGapMs);
+      cumulativeFrames += frameCount;
+      if (stageNs[0] > 0n) {
+        if (firstProducerNs === null) firstProducerNs = stageNs[0];
+        latestProducerNs = stageNs[0];
+      }
+      if (firstProducerNs !== null && latestProducerNs > firstProducerNs) {
+        const elapsedMs = Number(latestProducerNs - firstProducerNs) / 1e6;
+        bm.producer_rate = (cumulativeFrames / sampleRate * 1000) / elapsedMs;
+      }
+
+      const row = {
+        sequence,
+        unit_index: unitIndex,
+        unit_chunk_index: unitChunkIndex,
+        frame_count: frameCount,
+        audio_duration_ms: frameCount / sampleRate * 1000,
+        arrival_gap_ms: arrivalGapMs,
+        t0_model_yield_ns: stageNs[0].toString(),
+        t1_service_yield_ns: stageNs[1].toString(),
+        t2_client_receive_ns: stageNs[2].toString(),
+        t3_media_enqueue_ns: stageNs[3].toString(),
+        t4_web_audio_enqueue_ns: stageNs[4].toString(),
+        t5_websocket_send_ns: stageNs[5].toString(),
+        t6_browser_received_ms: receivedMs,
+      };
+      pcmTraceBySequence.set(sequence, row);
+      bm.pcm_trace.push(row);
+      row.t7_posted_to_worklet_ms = nowTurnMs();
+      pcmNode.port.postMessage(
+        { type: "pcm", buffer: payload, sequence, frameCount },
+        [payload],
+      );
+    };
+    ws.onerror = () => reject(new Error("WebSocket audio lỗi"));
+    ws.onclose = (event) => {
+      if (currentAudioSocket === ws) currentAudioSocket = null;
+      if (!ended && event.code !== 1000) reject(new Error(`WebSocket audio đóng (${event.code})`));
+    };
   });
-  if (!resp.ok || !resp.body) {
-    throw new Error(`Audio stream HTTP ${resp.status}`);
-  }
 
-  const reader = resp.body.getReader();
-  let carry = new Uint8Array(0);
-  let firstPayload = true;
-
-  while (true) {
-    const { value, done } = await reader.read();
-    if (done) break;
-    if (!value || !value.length) continue;
-
-    let chunk = value;
-    if (firstPayload) {
-      firstPayload = false;
-      bm.first_pcm_received_ms = nowTurnMs();
-      setText("mBrowserPcm", fmtMs(bm.first_pcm_received_ms));
-    }
-
-    if (carry.length) {
-      const joined = new Uint8Array(carry.length + chunk.length);
-      joined.set(carry, 0);
-      joined.set(chunk, carry.length);
-      chunk = joined;
-      carry = new Uint8Array(0);
-    }
-
-    if (chunk.length % 2) {
-      carry = chunk.slice(chunk.length - 1);
-      chunk = chunk.slice(0, chunk.length - 1);
-    }
-
-    if (chunk.length) {
-      const copy = chunk.slice();
-      pcmNode.port.postMessage({ type: "pcm", buffer: copy.buffer }, [copy.buffer]);
-    }
-  }
-
-  pcmNode.port.postMessage({ type: "end" });
+  bm.producer_throughput_status = bm.producer_rate === null
+    ? "unknown"
+    : bm.producer_rate < 1 ? "insufficient" : "headroom-observed";
   await postBrowserMetrics(turnId);
 }
 

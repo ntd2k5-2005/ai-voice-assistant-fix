@@ -4,6 +4,8 @@ import importlib.metadata
 import inspect
 import os
 import statistics
+import struct
+import threading
 import time
 from collections.abc import Iterator
 from contextlib import asynccontextmanager
@@ -65,6 +67,12 @@ streaming_supported = False
 resolved_backend: str | None = None
 warmup_metrics: dict[str, Any] | None = None
 
+# Optional trace framing used by the V10 application client.  HTTP is allowed
+# to split or coalesce body writes, so native generator yields cannot otherwise
+# be correlated with client reads.  Benchmark/legacy callers keep raw float32.
+_TRACE_MAGIC = b"TTS1"
+_TRACE_HEADER = struct.Struct("<4sIIIQQ")
+
 
 def _voice_identifier(value: Any) -> Any:
     if isinstance(value, (list, tuple)) and len(value) >= 2:
@@ -113,13 +121,13 @@ def _model_init_kwargs() -> dict[str, Any]:
     return {"mode": VIENEU_MODE, "backend": "onnx"}
 
 
-def iter_model_audio(
+def iter_model_audio_traced(
     text: str,
     *,
     selected_voice: Any,
     pre_chunked: bool,
     generation_mode: str = "stream",
-) -> Iterator[np.ndarray]:
+) -> Iterator[tuple[np.ndarray, int]]:
     if model is None:
         raise RuntimeError("TTS model is not ready")
 
@@ -130,7 +138,9 @@ def iter_model_audio(
             infer_fn,
             {"text": text, "voice": selected_voice, "max_chars": SENTENCE_MAX_CHARS},
         )
-        yield _as_float32_mono(infer_fn(**kwargs))
+        samples = infer_fn(**kwargs)
+        model_yield_ns = time.time_ns()
+        yield _as_float32_mono(samples), model_yield_ns
         return
 
     stream_fn = getattr(model, "infer_stream", None)
@@ -143,14 +153,32 @@ def iter_model_audio(
     )
     yielded = False
     for audio_chunk in stream_fn(**kwargs):
+        model_yield_ns = time.time_ns()
         if audio_chunk is None:
             continue
         samples = np.asarray(audio_chunk)
         if samples.size:
             yielded = True
-            yield _as_float32_mono(samples)
+            yield _as_float32_mono(samples), model_yield_ns
     if not yielded:
         raise RuntimeError("VieNeu infer_stream() produced no audio")
+
+
+def iter_model_audio(
+    text: str,
+    *,
+    selected_voice: Any,
+    pre_chunked: bool,
+    generation_mode: str = "stream",
+) -> Iterator[np.ndarray]:
+    """Compatibility iterator returning only PCM samples."""
+    for samples, _model_yield_ns in iter_model_audio_traced(
+        text,
+        selected_voice=selected_voice,
+        pre_chunked=pre_chunked,
+        generation_mode=generation_mode,
+    ):
+        yield samples
 
 
 def _measure_stream(text: str, selected_voice: Any) -> dict[str, Any]:
@@ -307,6 +335,9 @@ class TTSRequest(BaseModel):
     voice_index: int = Field(default=2, ge=0)
     pre_chunked: bool = True
     generation_mode: Literal["auto", "stream", "sentence"] = "stream"
+    trace_framed: bool = False
+    trace_id: str | None = Field(default=None, max_length=128)
+    unit_index: int | None = Field(default=None, ge=1)
 
 
 @app.get("/health/live")
@@ -349,6 +380,18 @@ def health_ready():
             "onnxruntime_version": _package_version("onnxruntime"),
             "onnxruntime_providers": (ort.get_available_providers() if ort is not None else None),
             "cpu_count": os.cpu_count(),
+            "process_id": os.getpid(),
+            "python_thread_count": threading.active_count(),
+            "thread_environment": {
+                key: os.getenv(key)
+                for key in (
+                    "OMP_NUM_THREADS",
+                    "OMP_WAIT_POLICY",
+                    "MKL_NUM_THREADS",
+                    "OPENBLAS_NUM_THREADS",
+                    "ORT_NUM_THREADS",
+                )
+            },
             "package_path": package_path,
             "environment_policy": "uv-sync-frozen",
         },
@@ -374,13 +417,27 @@ def generate_tts(request: TTSRequest):
     generation_mode = _resolve_generation_mode(request.generation_mode)
 
     def audio_stream_generator() -> Iterator[bytes]:
-        for samples in iter_model_audio(
+        sequence = 0
+        for samples, model_yield_ns in iter_model_audio_traced(
             text,
             selected_voice=selected_voice,
             pre_chunked=bool(request.pre_chunked),
             generation_mode=generation_mode,
         ):
-            yield samples.astype("<f4", copy=False).tobytes()
+            raw = samples.astype("<f4", copy=False).tobytes()
+            if request.trace_framed:
+                sequence += 1
+                service_yield_ns = time.time_ns()
+                yield _TRACE_HEADER.pack(
+                    _TRACE_MAGIC,
+                    sequence,
+                    int(samples.size),
+                    len(raw),
+                    model_yield_ns,
+                    service_yield_ns,
+                ) + raw
+            else:
+                yield raw
 
     return StreamingResponse(
         audio_stream_generator(),
@@ -394,6 +451,9 @@ def generate_tts(request: TTSRequest):
             "X-TTS-Backend": resolved_backend or "unknown",
             "X-TTS-Profile": TTS_PROFILE,
             "X-VieNeu-Upstream-Commit": UPSTREAM_COMMIT,
+            "X-TTS-Trace-Protocol": "tts1-f32" if request.trace_framed else "none",
+            "X-TTS-Trace-Id": request.trace_id or "",
+            "X-TTS-Unit-Index": str(request.unit_index or ""),
             "Cache-Control": "no-cache, no-transform",
             "X-Accel-Buffering": "no",
         },

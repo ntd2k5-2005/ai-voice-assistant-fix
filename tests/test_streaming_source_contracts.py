@@ -44,7 +44,9 @@ def test_v10_web_control_and_media_routes():
     assert '"X-Media-Plane": "audioworklet-raw-pcm-v10"' in web
     assert 'original_name = _safe_filename(file.filename' in web
     assert 'resolved_id = (document_id or "").strip() or Path(original_name).stem' in web
-    assert 'session.audio_queue.put_nowait(pcm16)' in web
+    assert '@app.websocket("/ws/turn/{turn_id}/audio")' in web
+    assert 'session.audio_queue.put_nowait(AudioPacket(pcm16, packet_meta))' in web
+    assert 'encode_pcm_websocket_packet(packet)' in web
 
 def test_knowledge_management_remains_available():
     web=(ROOT/"app/voice_app/web.py").read_text(encoding="utf-8")

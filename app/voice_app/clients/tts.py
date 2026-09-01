@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import uuid
+import struct
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -19,6 +20,8 @@ _DTYPE_MAP = {
     "float32": np.dtype("<f4"),
     "int16": np.dtype("<i2"),
 }
+_TRACE_MAGIC = b"TTS1"
+_TRACE_HEADER = struct.Struct("<4sIIIQQ")
 
 
 def decode_raw_pcm(
@@ -371,6 +374,8 @@ class TTSClient:
         text: str,
         *,
         voice_index: int,
+        trace_id: str | None = None,
+        unit_index: int | None = None,
     ) -> Iterator[dict]:
         """Forward upstream PCM with only frame-alignment buffering.
 
@@ -399,6 +404,33 @@ class TTSClient:
         upstream_backend = "unknown"
         profile = "unknown"
         upstream_commit = "unknown"
+        trace_protocol = "unknown"
+
+        def make_audio_event(raw: bytes, *, trace: dict | None = None) -> dict:
+            nonlocal byte_count, peak, emitted
+            samples = decode_raw_pcm(
+                raw,
+                dtype=self.dtype,
+                channels=self.channels,
+            )
+            peak = max(peak, float(np.max(np.abs(samples))))
+            byte_count += len(raw)
+            emitted += 1
+            frames = samples.shape[0] if samples.ndim > 1 else samples.size
+            return {
+                "type": "audio",
+                "raw": raw,
+                "duration_ms": frames / float(self.sample_rate) * 1000.0,
+                "frame_count": int(frames),
+                "chunk_index": emitted,
+                "ttfb_ms": (first_byte_at - started) * 1000.0,
+                "streaming_mode": streaming_mode,
+                "upstream_backend": upstream_backend,
+                "profile": profile,
+                "upstream_commit": upstream_commit,
+                "network_chunk_count": network_chunks,
+                "trace": trace or {},
+            }
 
         try:
             with self.client.stream(
@@ -409,6 +441,9 @@ class TTSClient:
                     "voice_index": int(voice_index),
                     "pre_chunked": True,
                     "generation_mode": "stream",
+                    "trace_framed": True,
+                    "trace_id": trace_id,
+                    "unit_index": unit_index,
                 },
             ) as r:
                 if r.status_code != 200:
@@ -426,6 +461,7 @@ class TTSClient:
                 upstream_backend = r.headers.get("X-TTS-Backend") or "unknown"
                 profile = r.headers.get("X-TTS-Profile") or "unknown"
                 upstream_commit = r.headers.get("X-VieNeu-Upstream-Commit") or "unknown"
+                trace_protocol = r.headers.get("X-TTS-Trace-Protocol") or "none"
                 if profile != "realtime":
                     raise ContractError(
                         "TTS realtime contract requires realtime profile, got "
@@ -441,6 +477,11 @@ class TTSClient:
                         "TTS realtime contract requires ONNX backend, got "
                         f"{upstream_backend!r}"
                     )
+                if trace_protocol != "tts1-f32":
+                    raise ContractError(
+                        "TTS realtime trace contract requires tts1-f32, got "
+                        f"{trace_protocol!r}"
+                    )
 
                 network_iter = (
                     iter((r.content,)) if r.is_stream_consumed else r.iter_raw()
@@ -454,32 +495,37 @@ class TTSClient:
                         first_byte_at = now
                     pending.extend(network_chunk)
 
-                    aligned = len(pending) - (len(pending) % frame_bytes)
-                    if aligned <= 0:
-                        continue
-                    raw = bytes(pending[:aligned])
-                    del pending[:aligned]
-                    samples = decode_raw_pcm(
-                        raw,
-                        dtype=self.dtype,
-                        channels=self.channels,
-                    )
-                    peak = max(peak, float(np.max(np.abs(samples))))
-                    byte_count += len(raw)
-                    emitted += 1
-                    frames = samples.shape[0] if samples.ndim > 1 else samples.size
-                    yield {
-                        "type": "audio",
-                        "raw": raw,
-                        "duration_ms": frames / float(self.sample_rate) * 1000.0,
-                        "chunk_index": emitted,
-                        "ttfb_ms": (first_byte_at - started) * 1000.0,
-                        "streaming_mode": streaming_mode,
-                        "upstream_backend": upstream_backend,
-                        "profile": profile,
-                        "upstream_commit": upstream_commit,
-                        "network_chunk_count": network_chunks,
-                    }
+                    # Parse model-yield frames independent of arbitrary HTTP
+                    # read boundaries.  A single network read may contain part
+                    # of one frame or several complete model frames.
+                    while len(pending) >= _TRACE_HEADER.size:
+                        magic, sequence, frames, payload_bytes, t0_ns, t1_ns = (
+                            _TRACE_HEADER.unpack_from(pending)
+                        )
+                        if magic != _TRACE_MAGIC:
+                            raise ContractError("TTS: invalid trace frame magic")
+                        expected_bytes = int(frames) * frame_bytes
+                        if payload_bytes != expected_bytes:
+                            raise ContractError(
+                                "TTS: trace frame size mismatch "
+                                f"(declared={payload_bytes}, expected={expected_bytes})"
+                            )
+                        frame_end = _TRACE_HEADER.size + payload_bytes
+                        if len(pending) < frame_end:
+                            break
+                        raw = bytes(pending[_TRACE_HEADER.size:frame_end])
+                        del pending[:frame_end]
+                        t2_ns = time.time_ns()
+                        yield make_audio_event(raw, trace={
+                            "trace_id": trace_id,
+                            "unit_index": unit_index,
+                            "service_chunk_index": int(sequence),
+                            "t0_model_yield_ns": int(t0_ns),
+                            "t1_service_yield_ns": int(t1_ns),
+                            "t2_client_receive_ns": t2_ns,
+                            "t0_t1_ms": (int(t1_ns) - int(t0_ns)) / 1_000_000.0,
+                            "t1_t2_ms": (t2_ns - int(t1_ns)) / 1_000_000.0,
+                        })
 
                 if pending:
                     raise ContractError(
@@ -520,6 +566,7 @@ class TTSClient:
             "upstream_backend": upstream_backend,
             "profile": profile,
             "upstream_commit": upstream_commit,
+            "trace_protocol": trace_protocol,
         }
 
     def synthesize_sentence_pcm(

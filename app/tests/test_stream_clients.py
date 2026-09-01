@@ -1,4 +1,6 @@
 from pathlib import Path
+import struct
+import time
 
 import httpx
 import numpy as np
@@ -99,6 +101,45 @@ def test_tts_stream_client_pcm_path_skips_per_chunk_wav_wrapping():
     assert all("wav" not in e for e in audio_events)
     assert sum(e["duration_ms"] for e in audio_events) == 1000.0
     assert events[-1]["streaming_mode"] == "frame-pcm"
+    client.close()
+
+
+def test_v10_native_pcm_trace_survives_coalesced_http_reads():
+    header = struct.Struct("<4sIIIQQ")
+    now = time.time_ns()
+    raw1 = (np.ones(240, dtype="<f4") * 0.1).tobytes()
+    raw2 = (np.ones(480, dtype="<f4") * 0.2).tobytes()
+    body = (
+        header.pack(b"TTS1", 1, 240, len(raw1), now, now + 10_000) + raw1
+        + header.pack(b"TTS1", 2, 480, len(raw2), now + 20_000, now + 30_000) + raw2
+    )
+
+    def handler(request: httpx.Request):
+        return httpx.Response(
+            200,
+            headers={
+                "content-type": "application/octet-stream",
+                "X-Audio-Streaming": "frame-pcm",
+                "X-TTS-Backend": "onnx",
+                "X-TTS-Profile": "realtime",
+                "X-TTS-Trace-Protocol": "tts1-f32",
+            },
+            content=body,
+        )
+
+    client = TTSClient("http://test", sample_rate=48000, channels=1, dtype="float32")
+    client.client.close()
+    client.client = httpx.Client(transport=httpx.MockTransport(handler))
+    events = list(
+        client.stream_native_pcm(
+            "Xin chào.", voice_index=0, trace_id="turn-1", unit_index=3
+        )
+    )
+    audio = [event for event in events if event["type"] == "audio"]
+    assert [event["frame_count"] for event in audio] == [240, 480]
+    assert [event["trace"]["service_chunk_index"] for event in audio] == [1, 2]
+    assert all(event["trace"]["trace_id"] == "turn-1" for event in audio)
+    assert events[-1]["trace_protocol"] == "tts1-f32"
     client.close()
 
 
