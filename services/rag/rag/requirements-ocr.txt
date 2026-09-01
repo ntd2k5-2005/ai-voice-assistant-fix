@@ -1,0 +1,3 @@
+# Optional RapidOCR backend. Tesseract's system binary is installed separately.
+-r requirements-core.txt
+rapidocr-onnxruntime>=1.4,<2

@@ -1,0 +1,11 @@
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+python-multipart==0.0.32
+torch==2.11.0
+torchaudio==2.11.0
+transformers==4.57.6
+accelerate>=1.10,<2
+librosa>=0.11,<1.1
+soundfile>=0.13,<1
+numpy>=2,<3
+silero-vad==6.2.1

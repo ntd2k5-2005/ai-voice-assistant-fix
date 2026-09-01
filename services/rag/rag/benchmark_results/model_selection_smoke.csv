@@ -1,0 +1,25 @@
+﻿mode,case_id,query,retrieved,relevant,recall@1,recall@5,recall@10,mrr,ndcg@10
+intfloat/multilingual-e5-small,q01,Thủ đô Việt Nam là thành phố nào?,"[""vi_capital"", ""da_nang"", ""mekong"", ""python"", ""water_cycle""]","[""vi_capital""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q02,Thành phố nào có bãi biển Mỹ Khê?,"[""da_nang"", ""vi_capital"", ""water_cycle"", ""mekong"", ""qdrant""]","[""da_nang""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q03,Vùng trồng lúa lớn ở miền Nam,"[""mekong"", ""da_nang"", ""vi_capital"", ""water_cycle"", ""diabetes""]","[""mekong""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q04,Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?,"[""photosynthesis"", ""water_cycle"", ""mekong"", ""vi_capital"", ""qdrant""]","[""photosynthesis""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q05,Ngôn ngữ lập trình dùng cho khoa học dữ liệu,"[""python"", ""qdrant"", ""photosynthesis"", ""diabetes"", ""water_cycle""]","[""python""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q06,Cơ sở dữ liệu vector có lọc metadata,"[""qdrant"", ""python"", ""mekong"", ""diabetes"", ""water_cycle""]","[""qdrant""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q07,Bệnh mạn tính có đường huyết cao,"[""diabetes"", ""water_cycle"", ""python"", ""mekong"", ""qdrant""]","[""diabetes""]",1.0,1.0,1.0,1.0,1.0
+intfloat/multilingual-e5-small,q08,Các giai đoạn bay hơi ngưng tụ và mưa,"[""water_cycle"", ""photosynthesis"", ""mekong"", ""diabetes"", ""da_nang""]","[""water_cycle""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q01,Thủ đô Việt Nam là thành phố nào?,"[""vi_capital"", ""da_nang"", ""mekong"", ""qdrant"", ""water_cycle""]","[""vi_capital""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q02,Thành phố nào có bãi biển Mỹ Khê?,"[""da_nang"", ""vi_capital"", ""water_cycle"", ""mekong"", ""qdrant""]","[""da_nang""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q03,Vùng trồng lúa lớn ở miền Nam,"[""mekong"", ""photosynthesis"", ""qdrant"", ""water_cycle"", ""da_nang""]","[""mekong""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q04,Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?,"[""photosynthesis"", ""mekong"", ""water_cycle"", ""python"", ""vi_capital""]","[""photosynthesis""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q05,Ngôn ngữ lập trình dùng cho khoa học dữ liệu,"[""python"", ""qdrant"", ""mekong"", ""water_cycle"", ""diabetes""]","[""python""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q06,Cơ sở dữ liệu vector có lọc metadata,"[""qdrant"", ""python"", ""water_cycle"", ""mekong"", ""photosynthesis""]","[""qdrant""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q07,Bệnh mạn tính có đường huyết cao,"[""diabetes"", ""water_cycle"", ""qdrant"", ""python"", ""mekong""]","[""diabetes""]",1.0,1.0,1.0,1.0,1.0
+sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2,q08,Các giai đoạn bay hơi ngưng tụ và mưa,"[""water_cycle"", ""photosynthesis"", ""mekong"", ""da_nang"", ""python""]","[""water_cycle""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q01,Thủ đô Việt Nam là thành phố nào?,"[""da_nang"", ""vi_capital"", ""mekong"", ""photosynthesis"", ""diabetes""]","[""vi_capital""]",0.0,1.0,1.0,0.5,0.6309297535714575
+cross-encoder/ms-marco-MiniLM-L-6-v2,q02,Thành phố nào có bãi biển Mỹ Khê?,"[""da_nang"", ""photosynthesis"", ""mekong"", ""diabetes"", ""python""]","[""da_nang""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q03,Vùng trồng lúa lớn ở miền Nam,"[""mekong"", ""da_nang"", ""python"", ""vi_capital"", ""qdrant""]","[""mekong""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q04,Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?,"[""photosynthesis"", ""diabetes"", ""mekong"", ""vi_capital"", ""da_nang""]","[""photosynthesis""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q05,Ngôn ngữ lập trình dùng cho khoa học dữ liệu,"[""python"", ""qdrant"", ""photosynthesis"", ""water_cycle"", ""vi_capital""]","[""python""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q06,Cơ sở dữ liệu vector có lọc metadata,"[""qdrant"", ""python"", ""da_nang"", ""photosynthesis"", ""water_cycle""]","[""qdrant""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q07,Bệnh mạn tính có đường huyết cao,"[""diabetes"", ""python"", ""qdrant"", ""vi_capital"", ""photosynthesis""]","[""diabetes""]",1.0,1.0,1.0,1.0,1.0
+cross-encoder/ms-marco-MiniLM-L-6-v2,q08,Các giai đoạn bay hơi ngưng tụ và mưa,"[""water_cycle"", ""diabetes"", ""python"", ""qdrant"", ""vi_capital""]","[""water_cycle""]",1.0,1.0,1.0,1.0,1.0

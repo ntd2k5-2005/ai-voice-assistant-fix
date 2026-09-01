@@ -1,0 +1,9 @@
+{
+  "repository": "https://github.com/pnnbao97/VieNeu-TTS.git",
+  "commit": "36c4b501b0634a8f59805e6b529a058fbd30190b",
+  "version": "3.3.0",
+  "install_mode": "uv-sync-frozen",
+  "profile": "realtime",
+  "backend": "onnx",
+  "device_policy": "cpu"
+}

@@ -1,0 +1,1298 @@
+{
+  "benchmark_kind": "end_to_end",
+  "configuration": {
+    "chunking": {
+      "fallback_max_tokens": 384,
+      "max_chunks_per_document": 100000,
+      "max_tokens": null,
+      "min_chunk_tokens": 8,
+      "overlap_tokens": 48,
+      "preserve_tables": true,
+      "reserved_tokens": 32,
+      "tokenizer_name": null
+    },
+    "dense_store": {
+      "collection_name": "rag_documents",
+      "distance": "cosine"
+    },
+    "embedding": {
+      "batch_safety_margin": 0.85,
+      "batch_size": null,
+      "device": "auto",
+      "dimension": null,
+      "document_instruction": null,
+      "document_template": null,
+      "dtype": "auto",
+      "fallback_max_length": 512,
+      "local_files_only": true,
+      "max_length": null,
+      "model_name": "intfloat/multilingual-e5-small",
+      "normalize": null,
+      "oom_retries": 8,
+      "profile_family": null,
+      "profile_requires_remote_code": null,
+      "query_instruction": null,
+      "query_template": null,
+      "revision": null,
+      "trust_remote_code": false
+    },
+    "fusion": {
+      "dense_weight": 0.5,
+      "rrf_k": 60,
+      "sparse_weight": 0.5,
+      "strategy": "weighted"
+    },
+    "lifecycle": {
+      "cleanup_old_versions": true,
+      "lock_timeout_seconds": 30.0,
+      "recover_on_startup": true
+    },
+    "normalization": {
+      "collapse_blank_lines": 2,
+      "normalize_line_endings": true,
+      "strip_control_characters": true,
+      "trim_trailing_whitespace": true,
+      "unicode_form": "NFC"
+    },
+    "parser": {
+      "allowed_extensions": [
+        ".pdf",
+        ".docx",
+        ".xlsx",
+        ".xlsm",
+        ".pptx",
+        ".csv",
+        ".tsv",
+        ".txt",
+        ".md",
+        ".markdown",
+        ".html",
+        ".htm",
+        ".json",
+        ".jsonl",
+        ".ldjson",
+        ".epub",
+        ".mdx",
+        ".py",
+        ".js",
+        ".java",
+        ".c",
+        ".cpp",
+        ".h",
+        ".php",
+        ".go",
+        ".ts",
+        ".sh",
+        ".cs",
+        ".kt",
+        ".sql"
+      ],
+      "encoding_fallbacks": [
+        "utf-8-sig",
+        "utf-8",
+        "cp1258",
+        "latin-1"
+      ],
+      "max_file_bytes": 104857600,
+      "max_pages": 2000,
+      "max_units": 100000,
+      "ocr": {
+        "backend": "auto",
+        "dpi": 200,
+        "languages": [
+          "vie",
+          "eng"
+        ],
+        "min_text_characters": 24,
+        "strategy": "auto",
+        "timeout_seconds": 120.0
+      },
+      "reject_extension_mismatch": false,
+      "sniff_mime": true
+    },
+    "paths": {
+      "benchmark_output": "rag\\benchmark_results",
+      "qdrant": "<temporary benchmark workspace>",
+      "registry": "<temporary benchmark workspace>",
+      "sparse": "<temporary benchmark workspace>"
+    },
+    "reranker": {
+      "adapter": "auto",
+      "batch_size": null,
+      "device": "auto",
+      "dtype": "auto",
+      "failure_policy": "raise",
+      "fallback_max_length": 512,
+      "higher_is_better": null,
+      "instruction": null,
+      "local_files_only": true,
+      "max_length": null,
+      "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "no_token_id": null,
+      "oom_retries": 8,
+      "pair_template": null,
+      "positive_label_index": null,
+      "profile_family": null,
+      "profile_requires_remote_code": null,
+      "revision": null,
+      "score_extraction": null,
+      "timeout_ms": null,
+      "trust_remote_code": false,
+      "yes_token_id": null
+    },
+    "retrieval": {
+      "allow_sparse_rerank": true,
+      "candidate_k": 8,
+      "max_query_characters": 32000,
+      "parallel_hybrid": false,
+      "top_k": 5
+    },
+    "sparse": {
+      "query_operator": "or",
+      "tokenizer": "unicode61"
+    },
+    "warmup_queries_per_mode": 1
+  },
+  "dataset": {
+    "cases": 8,
+    "documents": 8,
+    "identity_field": "document_id",
+    "language": "vi",
+    "limitations": "small warmed smoke run; latency is local-machine specific",
+    "name": "built-in-vietnamese-diagnostic-v1",
+    "provenance": "authored diagnostic fixtures bundled with rag-service"
+  },
+  "environment": {
+    "packages": {
+      "numpy": "2.5.2",
+      "openpyxl": "3.1.5",
+      "pdfplumber": "0.11.10",
+      "qdrant-client": "1.19.0",
+      "sentence-transformers": "5.7.0",
+      "torch": "2.13.0",
+      "transformers": "5.15.0"
+    },
+    "platform": "Windows-11-10.0.26200-SP0",
+    "processor": "Intel64 Family 6 Model 165 Stepping 2, GenuineIntel",
+    "python": "3.13.15 (tags/v3.13.15:4061bc4, Aug  5 2026, 13:05:39) [MSC v.1944 64 bit (AMD64)]",
+    "seed": 42,
+    "timestamp_utc": "2026-08-16T13:46:33.303076+00:00"
+  },
+  "models": {
+    "accelerator_memory": {
+      "device": "cpu",
+      "note": "VRAM is not applicable to this CPU run",
+      "peak_vram_mb": null
+    },
+    "embedding": {
+      "batch_size": 32,
+      "batch_size_source": "automatic",
+      "device": "cpu",
+      "dimension": 384,
+      "dimension_source": "model.get_embedding_dimension",
+      "document_template": "passage: {text}",
+      "dtype": "torch.float32",
+      "family": "e5",
+      "local_files_only": true,
+      "max_length": 512,
+      "max_length_source": "model.max_seq_length",
+      "max_oom_retries": 8,
+      "model_name": "intfloat/multilingual-e5-small",
+      "normalize": true,
+      "profile_hash": "37dc33f4221524b3192e394856708176fb9deb409786c2b6de85fed35b6a2f51",
+      "query_template": "query: {text}",
+      "requested_revision": null,
+      "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "trust_remote_code": false
+    },
+    "reranker": {
+      "architecture": "sequence_classification",
+      "batch_size": 8,
+      "batch_size_source": "automatic",
+      "device": "cpu",
+      "dtype": "auto",
+      "family": "cross-encoder",
+      "higher_is_better": true,
+      "local_files_only": true,
+      "max_length": 512,
+      "max_length_source": "tokenizer.model_max_length",
+      "max_oom_retries": 8,
+      "model_name": "cross-encoder/ms-marco-MiniLM-L-6-v2",
+      "profile_hash": "3c2b89e224841c76bc6daa877892c28e3fdb2620e8fac4bc1ef5d09171dd6242",
+      "requested_revision": null,
+      "revision": "233902d25c440f23af6f7d6e94d2946bac0bee0a",
+      "score_extraction": "auto",
+      "timeout_ms": null,
+      "trust_remote_code": false
+    }
+  },
+  "modes": {
+    "dense": {
+      "latency_ms": {
+        "dense_search_ms": {
+          "mean": 2.6096250003320165,
+          "p50": 2.4575999996159226,
+          "p95": 3.541800018865615
+        },
+        "fusion_ms": {
+          "mean": 0.08573749801144004,
+          "p50": 0.07919999188743532,
+          "p95": 0.13040000339969993
+        },
+        "query_embedding_ms": {
+          "mean": 25.34522499627201,
+          "p50": 24.740199994994327,
+          "p95": 29.170299996621907
+        },
+        "rerank_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "sparse_search_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "total_ms": {
+          "mean": 28.372124997986248,
+          "p50": 27.928800001973286,
+          "p95": 31.94929999881424
+        }
+      },
+      "quality": {
+        "hit_rate@10": 1.0,
+        "hit_rate@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@10": 1.0,
+        "recall@1": 1.0,
+        "recall@10": 1.0,
+        "recall@5": 1.0
+      },
+      "queries": [
+        {
+          "case_id": "q01",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thủ đô Việt Nam là thành phố nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "vi_capital"
+          ],
+          "retrieved": [
+            "vi_capital",
+            "da_nang",
+            "mekong",
+            "python",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 2.4575999996159226,
+            "fusion_ms": 0.08060000254772604,
+            "query_embedding_ms": 26.913599984254688,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 29.79040000354871
+          }
+        },
+        {
+          "case_id": "q02",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thành phố nào có bãi biển Mỹ Khê?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "da_nang"
+          ],
+          "retrieved": [
+            "da_nang",
+            "vi_capital",
+            "water_cycle",
+            "mekong",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.5428000080864877,
+            "fusion_ms": 0.08100000559352338,
+            "query_embedding_ms": 24.958199996035546,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 27.928800001973286
+          }
+        },
+        {
+          "case_id": "q03",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Vùng trồng lúa lớn ở miền Nam",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "mekong"
+          ],
+          "retrieved": [
+            "mekong",
+            "da_nang",
+            "vi_capital",
+            "water_cycle",
+            "diabetes"
+          ],
+          "timing": {
+            "dense_search_ms": 2.4169000098481774,
+            "fusion_ms": 0.0785999873187393,
+            "query_embedding_ms": 25.952399999368936,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 28.772099991329014
+          }
+        },
+        {
+          "case_id": "q04",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "photosynthesis"
+          ],
+          "retrieved": [
+            "photosynthesis",
+            "water_cycle",
+            "mekong",
+            "vi_capital",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.4163000052794814,
+            "fusion_ms": 0.07949999417178333,
+            "query_embedding_ms": 29.170299996621907,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 31.94929999881424
+          }
+        },
+        {
+          "case_id": "q05",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Ngôn ngữ lập trình dùng cho khoa học dữ liệu",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "python"
+          ],
+          "retrieved": [
+            "python",
+            "qdrant",
+            "photosynthesis",
+            "diabetes",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 2.455899986671284,
+            "fusion_ms": 0.07770000956952572,
+            "query_embedding_ms": 23.50850001676008,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 26.323999976739287
+          }
+        },
+        {
+          "case_id": "q06",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Cơ sở dữ liệu vector có lọc metadata",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "qdrant"
+          ],
+          "retrieved": [
+            "qdrant",
+            "python",
+            "mekong",
+            "diabetes",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 3.541800018865615,
+            "fusion_ms": 0.13040000339969993,
+            "query_embedding_ms": 23.968299996340647,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 28.11490002204664
+          }
+        },
+        {
+          "case_id": "q07",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Bệnh mạn tính có đường huyết cao",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "diabetes"
+          ],
+          "retrieved": [
+            "diabetes",
+            "water_cycle",
+            "python",
+            "mekong",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.569199976278469,
+            "fusion_ms": 0.0788999896030873,
+            "query_embedding_ms": 23.55029998579994,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 26.522700005443767
+          }
+        },
+        {
+          "case_id": "q08",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Các giai đoạn bay hơi ngưng tụ và mưa",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "water_cycle"
+          ],
+          "retrieved": [
+            "water_cycle",
+            "photosynthesis",
+            "mekong",
+            "diabetes",
+            "da_nang"
+          ],
+          "timing": {
+            "dense_search_ms": 2.476499998010695,
+            "fusion_ms": 0.07919999188743532,
+            "query_embedding_ms": 24.740199994994327,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.0,
+            "total_ms": 27.574799983995035
+          }
+        }
+      ]
+    },
+    "hybrid": {
+      "latency_ms": {
+        "dense_search_ms": {
+          "mean": 3.122025002085138,
+          "p50": 2.9637999832630157,
+          "p95": 3.7447999930009246
+        },
+        "fusion_ms": {
+          "mean": 0.17596250108908862,
+          "p50": 0.16480000340379775,
+          "p95": 0.2182000025641173
+        },
+        "query_embedding_ms": {
+          "mean": 25.001987498399103,
+          "p50": 24.417199980234727,
+          "p95": 26.266900007613003
+        },
+        "rerank_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "sparse_search_ms": {
+          "mean": 0.9510375057288911,
+          "p50": 0.8407999994233251,
+          "p95": 1.2541000032797456
+        },
+        "total_ms": {
+          "mean": 29.650987504282966,
+          "p50": 29.583900002762675,
+          "p95": 31.2497999984771
+        }
+      },
+      "quality": {
+        "hit_rate@10": 1.0,
+        "hit_rate@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@10": 1.0,
+        "recall@1": 1.0,
+        "recall@10": 1.0,
+        "recall@5": 1.0
+      },
+      "queries": [
+        {
+          "case_id": "q01",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thủ đô Việt Nam là thành phố nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "vi_capital"
+          ],
+          "retrieved": [
+            "vi_capital",
+            "da_nang",
+            "mekong",
+            "photosynthesis",
+            "python"
+          ],
+          "timing": {
+            "dense_search_ms": 2.9637999832630157,
+            "fusion_ms": 0.1855999871622771,
+            "query_embedding_ms": 23.82110001053661,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 1.146299997344613,
+            "total_ms": 28.548400005092844
+          }
+        },
+        {
+          "case_id": "q02",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thành phố nào có bãi biển Mỹ Khê?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "da_nang"
+          ],
+          "retrieved": [
+            "da_nang",
+            "vi_capital",
+            "water_cycle",
+            "mekong",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.672100003110245,
+            "fusion_ms": 0.16419999883510172,
+            "query_embedding_ms": 26.266900007613003,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.7793000258971006,
+            "total_ms": 30.262100015534088
+          }
+        },
+        {
+          "case_id": "q03",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Vùng trồng lúa lớn ở miền Nam",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "mekong"
+          ],
+          "retrieved": [
+            "mekong",
+            "da_nang",
+            "vi_capital",
+            "water_cycle",
+            "diabetes"
+          ],
+          "timing": {
+            "dense_search_ms": 2.9866000113543123,
+            "fusion_ms": 0.15990002430044115,
+            "query_embedding_ms": 23.96049999515526,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.7668000180274248,
+            "total_ms": 28.235500009031966
+          }
+        },
+        {
+          "case_id": "q04",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "photosynthesis"
+          ],
+          "retrieved": [
+            "photosynthesis",
+            "water_cycle",
+            "mekong",
+            "vi_capital",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.601600019261241,
+            "fusion_ms": 0.16480000340379775,
+            "query_embedding_ms": 24.417199980234727,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 1.0590000019874424,
+            "total_ms": 28.624200000194833
+          }
+        },
+        {
+          "case_id": "q05",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Ngôn ngữ lập trình dùng cho khoa học dữ liệu",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "python"
+          ],
+          "retrieved": [
+            "python",
+            "qdrant",
+            "photosynthesis",
+            "diabetes",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 2.8951000131201,
+            "fusion_ms": 0.2182000025641173,
+            "query_embedding_ms": 26.167299976805225,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.9315999923273921,
+            "total_ms": 30.599199992138892
+          }
+        },
+        {
+          "case_id": "q06",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Cơ sở dữ liệu vector có lọc metadata",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "qdrant"
+          ],
+          "retrieved": [
+            "qdrant",
+            "python",
+            "mekong",
+            "diabetes",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 3.5758999874815345,
+            "fusion_ms": 0.15959999291226268,
+            "query_embedding_ms": 25.156699994113296,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.8407999994233251,
+            "total_ms": 30.10480001103133
+          }
+        },
+        {
+          "case_id": "q07",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Bệnh mạn tính có đường huyết cao",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "diabetes"
+          ],
+          "retrieved": [
+            "diabetes",
+            "water_cycle",
+            "python",
+            "mekong",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 3.7447999930009246,
+            "fusion_ms": 0.16639998648315668,
+            "query_embedding_ms": 26.102100004209206,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.8304000075440854,
+            "total_ms": 31.2497999984771
+          }
+        },
+        {
+          "case_id": "q08",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Các giai đoạn bay hơi ngưng tụ và mưa",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "water_cycle"
+          ],
+          "retrieved": [
+            "water_cycle",
+            "photosynthesis",
+            "diabetes",
+            "mekong",
+            "da_nang"
+          ],
+          "timing": {
+            "dense_search_ms": 3.536300006089732,
+            "fusion_ms": 0.18900001305155456,
+            "query_embedding_ms": 24.124100018525496,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 1.2541000032797456,
+            "total_ms": 29.583900002762675
+          }
+        }
+      ]
+    },
+    "hybrid+rerank": {
+      "latency_ms": {
+        "dense_search_ms": {
+          "mean": 3.3020999981090426,
+          "p50": 3.01949999993667,
+          "p95": 5.337000009603798
+        },
+        "fusion_ms": {
+          "mean": 0.22023750352673233,
+          "p50": 0.17340001068077981,
+          "p95": 0.3529000096023083
+        },
+        "query_embedding_ms": {
+          "mean": 29.700724997383077,
+          "p50": 28.5786000022199,
+          "p95": 36.679399985587224
+        },
+        "rerank_ms": {
+          "mean": 83.76035000401316,
+          "p50": 81.1839000089094,
+          "p95": 99.86469999421388
+        },
+        "sparse_search_ms": {
+          "mean": 1.3278999977046624,
+          "p50": 1.0056000028271228,
+          "p95": 2.301200001966208
+        },
+        "total_ms": {
+          "mean": 118.98625000321772,
+          "p50": 114.09960000310093,
+          "p95": 144.77480002096854
+        }
+      },
+      "quality": {
+        "hit_rate@10": 1.0,
+        "hit_rate@5": 1.0,
+        "mrr": 0.9375,
+        "ndcg@10": 0.9538662191964322,
+        "recall@1": 0.875,
+        "recall@10": 1.0,
+        "recall@5": 1.0
+      },
+      "queries": [
+        {
+          "case_id": "q01",
+          "hit@5": 1.0,
+          "mrr": 0.5,
+          "ndcg@10": 0.6309297535714575,
+          "query": "Thủ đô Việt Nam là thành phố nào?",
+          "recall@1": 0.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "vi_capital"
+          ],
+          "retrieved": [
+            "da_nang",
+            "vi_capital",
+            "mekong",
+            "photosynthesis",
+            "diabetes"
+          ],
+          "timing": {
+            "dense_search_ms": 3.107399999862537,
+            "fusion_ms": 0.3529000096023083,
+            "query_embedding_ms": 25.4566999792587,
+            "rerank_ms": 71.61909999558702,
+            "sparse_search_ms": 1.7683999903965741,
+            "total_ms": 102.94370001065545
+          }
+        },
+        {
+          "case_id": "q02",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thành phố nào có bãi biển Mỹ Khê?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "da_nang"
+          ],
+          "retrieved": [
+            "da_nang",
+            "photosynthesis",
+            "mekong",
+            "diabetes",
+            "python"
+          ],
+          "timing": {
+            "dense_search_ms": 2.872400014894083,
+            "fusion_ms": 0.1577999792061746,
+            "query_embedding_ms": 25.738099997397512,
+            "rerank_ms": 81.1839000089094,
+            "sparse_search_ms": 0.8003000111784786,
+            "total_ms": 111.15210002753884
+          }
+        },
+        {
+          "case_id": "q03",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Vùng trồng lúa lớn ở miền Nam",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "mekong"
+          ],
+          "retrieved": [
+            "mekong",
+            "da_nang",
+            "python",
+            "vi_capital",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 2.773399988655001,
+            "fusion_ms": 0.1674999948590994,
+            "query_embedding_ms": 27.74739998858422,
+            "rerank_ms": 82.01540002482943,
+            "sparse_search_ms": 0.908499991055578,
+            "total_ms": 114.09960000310093
+          }
+        },
+        {
+          "case_id": "q04",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "photosynthesis"
+          ],
+          "retrieved": [
+            "photosynthesis",
+            "diabetes",
+            "mekong",
+            "vi_capital",
+            "da_nang"
+          ],
+          "timing": {
+            "dense_search_ms": 5.337000009603798,
+            "fusion_ms": 0.30100002186372876,
+            "query_embedding_ms": 36.679399985587224,
+            "rerank_ms": 99.86469999421388,
+            "sparse_search_ms": 1.8531999958213419,
+            "total_ms": 144.77480002096854
+          }
+        },
+        {
+          "case_id": "q05",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Ngôn ngữ lập trình dùng cho khoa học dữ liệu",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "python"
+          ],
+          "retrieved": [
+            "python",
+            "qdrant",
+            "photosynthesis",
+            "water_cycle",
+            "vi_capital"
+          ],
+          "timing": {
+            "dense_search_ms": 2.9002999945078045,
+            "fusion_ms": 0.17340001068077981,
+            "query_embedding_ms": 28.5786000022199,
+            "rerank_ms": 78.82819999940693,
+            "sparse_search_ms": 1.0136000055354089,
+            "total_ms": 111.92429999937303
+          }
+        },
+        {
+          "case_id": "q06",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Cơ sở dữ liệu vector có lọc metadata",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "qdrant"
+          ],
+          "retrieved": [
+            "qdrant",
+            "python",
+            "da_nang",
+            "photosynthesis",
+            "water_cycle"
+          ],
+          "timing": {
+            "dense_search_ms": 3.060199989704415,
+            "fusion_ms": 0.17340001068077981,
+            "query_embedding_ms": 31.082900008186698,
+            "rerank_ms": 87.43549999780953,
+            "sparse_search_ms": 0.9723999828565866,
+            "total_ms": 123.16749998717569
+          }
+        },
+        {
+          "case_id": "q07",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Bệnh mạn tính có đường huyết cao",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "diabetes"
+          ],
+          "retrieved": [
+            "diabetes",
+            "python",
+            "qdrant",
+            "vi_capital",
+            "photosynthesis"
+          ],
+          "timing": {
+            "dense_search_ms": 3.01949999993667,
+            "fusion_ms": 0.18889998318627477,
+            "query_embedding_ms": 30.960400006733835,
+            "rerank_ms": 80.07789999828674,
+            "sparse_search_ms": 1.0056000028271228,
+            "total_ms": 115.7169999787584
+          }
+        },
+        {
+          "case_id": "q08",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Các giai đoạn bay hơi ngưng tụ và mưa",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "water_cycle"
+          ],
+          "retrieved": [
+            "water_cycle",
+            "diabetes",
+            "python",
+            "qdrant",
+            "vi_capital"
+          ],
+          "timing": {
+            "dense_search_ms": 3.346599987708032,
+            "fusion_ms": 0.24700001813471317,
+            "query_embedding_ms": 31.362300011096522,
+            "rerank_ms": 89.05810001306236,
+            "sparse_search_ms": 2.301200001966208,
+            "total_ms": 128.11099999817088
+          }
+        }
+      ]
+    },
+    "sparse": {
+      "latency_ms": {
+        "dense_search_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "fusion_ms": {
+          "mean": 0.05410000085248612,
+          "p50": 0.04260000423528254,
+          "p95": 0.10770000517368317
+        },
+        "query_embedding_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "rerank_ms": {
+          "mean": 0.0,
+          "p50": 0.0,
+          "p95": 0.0
+        },
+        "sparse_search_ms": {
+          "mean": 0.8300875015265774,
+          "p50": 0.7070999999996275,
+          "p95": 1.2200000055599958
+        },
+        "total_ms": {
+          "mean": 1.0116625016962644,
+          "p50": 0.8719000034034252,
+          "p95": 1.479400001699105
+        }
+      },
+      "quality": {
+        "hit_rate@10": 1.0,
+        "hit_rate@5": 1.0,
+        "mrr": 1.0,
+        "ndcg@10": 1.0,
+        "recall@1": 1.0,
+        "recall@10": 1.0,
+        "recall@5": 1.0
+      },
+      "queries": [
+        {
+          "case_id": "q01",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thủ đô Việt Nam là thành phố nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "vi_capital"
+          ],
+          "retrieved": [
+            "vi_capital",
+            "da_nang",
+            "mekong",
+            "photosynthesis",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.10770000517368317,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 1.134299993282184,
+            "total_ms": 1.429600000847131
+          }
+        },
+        {
+          "case_id": "q02",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thành phố nào có bãi biển Mỹ Khê?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "da_nang"
+          ],
+          "retrieved": [
+            "da_nang",
+            "photosynthesis",
+            "qdrant"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.0337999954354018,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.6381999992299825,
+            "total_ms": 0.7779000152368098
+          }
+        },
+        {
+          "case_id": "q03",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Vùng trồng lúa lớn ở miền Nam",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "mekong"
+          ],
+          "retrieved": [
+            "mekong",
+            "da_nang",
+            "vi_capital"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.03409999771974981,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.6037999992258847,
+            "total_ms": 0.7394000131171197
+          }
+        },
+        {
+          "case_id": "q04",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Thực vật tạo chất hữu cơ nhờ ánh sáng như thế nào?",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "photosynthesis"
+          ],
+          "retrieved": [
+            "photosynthesis",
+            "qdrant",
+            "mekong",
+            "diabetes"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.04430001717992127,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.963800004683435,
+            "total_ms": 1.127800001995638
+          }
+        },
+        {
+          "case_id": "q05",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Ngôn ngữ lập trình dùng cho khoa học dữ liệu",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "python"
+          ],
+          "retrieved": [
+            "python",
+            "qdrant",
+            "photosynthesis"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.05259999306872487,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.7360000163316727,
+            "total_ms": 0.8947000023908913
+          }
+        },
+        {
+          "case_id": "q06",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Cơ sở dữ liệu vector có lọc metadata",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "qdrant"
+          ],
+          "retrieved": [
+            "qdrant",
+            "photosynthesis",
+            "python"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.03369999467395246,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.6374999938998371,
+            "total_ms": 0.772599974879995
+          }
+        },
+        {
+          "case_id": "q07",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Bệnh mạn tính có đường huyết cao",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "diabetes"
+          ],
+          "retrieved": [
+            "diabetes",
+            "qdrant",
+            "photosynthesis",
+            "python"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.04260000423528254,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 0.7070999999996275,
+            "total_ms": 0.8719000034034252
+          }
+        },
+        {
+          "case_id": "q08",
+          "hit@5": 1.0,
+          "mrr": 1.0,
+          "ndcg@10": 1.0,
+          "query": "Các giai đoạn bay hơi ngưng tụ và mưa",
+          "recall@1": 1.0,
+          "recall@10": 1.0,
+          "recall@5": 1.0,
+          "relevant": [
+            "water_cycle"
+          ],
+          "retrieved": [
+            "water_cycle",
+            "photosynthesis",
+            "diabetes",
+            "da_nang",
+            "vi_capital"
+          ],
+          "timing": {
+            "dense_search_ms": 0.0,
+            "fusion_ms": 0.08399999933317304,
+            "query_embedding_ms": null,
+            "rerank_ms": 0.0,
+            "sparse_search_ms": 1.2200000055599958,
+            "total_ms": 1.479400001699105
+          }
+        }
+      ]
+    }
+  },
+  "schema_version": 1
+}

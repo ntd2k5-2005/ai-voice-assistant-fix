@@ -1,0 +1,106 @@
+import numpy as np
+import pytest
+
+import api
+from api import iter_model_audio
+
+
+def test_iter_model_audio_auto_uses_native_stream(monkeypatch):
+    class FakeModel:
+        def infer_stream(self, **kwargs):
+            yield np.ones(120, dtype=np.float32) * 0.1
+            yield np.ones(80, dtype=np.float32) * 0.2
+
+        def infer(self, **kwargs):
+            raise AssertionError("blocking infer should not be used")
+
+    monkeypatch.setattr(api, "model", FakeModel())
+    monkeypatch.setattr(api, "FORCE_BLOCKING", False)
+    chunks = list(
+        iter_model_audio(
+            "Xin chào",
+            selected_voice={"voice": "x"},
+            pre_chunked=True,
+            generation_mode="auto",
+        )
+    )
+    assert [chunk.size for chunk in chunks] == [120, 80]
+
+
+def test_sentence_mode_remains_explicit_compatibility_path(monkeypatch):
+    calls = []
+
+    class FakeModel:
+        def infer(self, **kwargs):
+            calls.append(kwargs)
+            return np.ones(256, dtype=np.float32) * 0.1
+
+    monkeypatch.setattr(api, "model", FakeModel())
+    text = "Đây là một câu hoàn chỉnh."
+    chunks = list(
+        iter_model_audio(
+            text,
+            selected_voice={"voice": "x"},
+            pre_chunked=True,
+            generation_mode="sentence",
+        )
+    )
+    assert len(chunks) == 1
+    assert calls[0]["text"] == text
+    assert calls[0]["max_chars"] == api.SENTENCE_MAX_CHARS
+
+
+def test_v10_realtime_rejects_missing_native_stream(monkeypatch):
+    class FakeModel:
+        def infer(self, **kwargs):
+            return np.ones(64, dtype=np.float32)
+
+    monkeypatch.setattr(api, "model", FakeModel())
+    monkeypatch.setattr(api, "FORCE_BLOCKING", False)
+    with pytest.raises(RuntimeError, match="requires VieNeu infer_stream"):
+        list(
+            iter_model_audio(
+                "Xin chào",
+                selected_voice={"voice": "x"},
+                pre_chunked=True,
+                generation_mode="stream",
+            )
+        )
+
+
+def test_v10_runtime_is_onnx_streaming_profile():
+    assert api.TTS_PROFILE == "realtime"
+    assert api.VIENEU_BACKEND == "onnx"
+    assert api.VIENEU_DEVICE == "cpu"
+    assert api.DEFAULT_GENERATION_MODE == "stream"
+    assert 176 <= api.STREAM_MAX_CHARS <= 224
+    assert api._model_init_kwargs() == {"mode": api.VIENEU_MODE, "backend": "onnx"}
+
+
+def test_warmup_measurement_reports_rtf_and_gaps(monkeypatch):
+    class FakeModel:
+        def infer_stream(self, **kwargs):
+            yield np.ones(480, dtype=np.float32) * 0.1
+            yield np.ones(480, dtype=np.float32) * 0.1
+
+    monkeypatch.setattr(api, "model", FakeModel())
+    monkeypatch.setattr(api, "SAMPLE_RATE", 48000)
+    result = api._measure_stream("Xin chào", {"voice": "x"})
+    assert result["chunk_count"] == 2
+    assert result["audio_duration_ms"] == pytest.approx(20.0)
+    assert result["rtf"] is not None
+    assert result["ttfb_ms"] is not None
+
+
+
+def test_v10_warmup_profiles_short_and_medium(monkeypatch):
+    class FakeModel:
+        def get_preset_voice(self, x): return x
+        def infer_stream(self, **kwargs):
+            yield np.ones(480, dtype=np.float32) * 0.1
+    monkeypatch.setattr(api, "model", FakeModel())
+    monkeypatch.setattr(api, "voices", [("x", "x")])
+    monkeypatch.setattr(api, "WARMUP_RUNS", 1)
+    result = api._run_warmup()
+    assert result["profiles"] == ["short", "medium"]
+    assert len(result["runs"]) == 2

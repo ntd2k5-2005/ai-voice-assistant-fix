@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "voice-integration-app"
+version = "0.10.0"
+description = "Eureka V10 decoupled realtime voice integration with WebSocket control and AudioWorklet PCM playback"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.27,<1",
+    "pydantic>=2.8,<3",
+    "pydantic-settings>=2.4,<3",
+    "python-dotenv>=1.0,<2",
+    "numpy>=1.26,<3",
+    "scipy>=1.11,<2",
+]
+
+[project.optional-dependencies]
+demo = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "python-multipart>=0.0.9,<1",
+]
+api = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "python-multipart>=0.0.9,<1",
+]
+admin = [
+    "gradio==5.49.1",
+]
+dev = [
+    "pytest>=8,<10",
+]
+
+[project.scripts]
+voice-demo = "voice_app.web:main"
+voice-admin = "voice_app.ui:main"
+voice-gateway = "voice_app.gateway:main"
+voice-check = "voice_app.smoke:main"
+
+[tool.setuptools.packages.find]
+include = ["voice_app*"]
+
+[tool.setuptools.package-data]
+voice_app = ["web_assets/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
