@@ -283,7 +283,7 @@ async function streamAudio(turnId, generation, epoch, sampleRate) {
   for (let attempt = 0; attempt < 3 && owns(turnId, generation); attempt++) {
     try {
       const ended = await new Promise((resolve, reject) => {
-        const ws = new WebSocket(websocketUrl(turnId, "/audio"));
+        const ws = new WebSocket(websocketUrl(turnId, "/audio", expectedSequence - 1));
         currentAudioSocket = ws;
         ws.binaryType = "arraybuffer";
         let cleanEnd = false;

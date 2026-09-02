@@ -111,10 +111,11 @@ class V10MediaPipeline:
             },
         }
 
-        control_q: queue.Queue[dict[str, Any]] = queue.Queue()
-        # The text spool is intentionally unbounded. LLM_MAX_TOKENS bounds a turn,
-        # and decoupling this path is the fix for V9's 8.4s LLM/TTS backpressure.
-        speech_spool: queue.Queue[str | object] = queue.Queue()
+        queue_capacity = max(4096, self.settings.llm_max_tokens * 16)
+        control_q: queue.Queue[dict[str, Any]] = queue.Queue(maxsize=queue_capacity)
+        # Capacity is deliberately larger than the maximum generated token count,
+        # preserving normal decoupling while retaining a hard memory bound.
+        speech_spool: queue.Queue[str | object] = queue.Queue(maxsize=queue_capacity)
         media_q: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=self.settings.tts_audio_queue_max)
         llm_done = threading.Event()
         segmenter_done = threading.Event()
@@ -147,12 +148,20 @@ class V10MediaPipeline:
             "min_producer_lead_ms": None,
             "pcm_trace": [],
             "max_media_queue_wait_ms": 0.0,
+            "queue_capacity": queue_capacity,
+            "replay_truncated": False,
+            "replay_bytes": 0,
         }
 
         def put_control(event: dict[str, Any]) -> None:
             if cancelled() and event.get("type") not in {"error", "cancelled"}:
                 return
-            control_q.put(event)
+            while not cancelled():
+                try:
+                    control_q.put(event, timeout=0.05)
+                    break
+                except queue.Full:
+                    continue
             shared["max_control_queue_depth"] = max(shared["max_control_queue_depth"], control_q.qsize())
 
         def put_media(event: dict[str, Any] | None) -> None:
@@ -173,6 +182,18 @@ class V10MediaPipeline:
                         return
             shared["media_queue_backpressure_ms"] += (time.perf_counter() - before) * 1000.0
             shared["max_media_queue_depth"] = max(shared["max_media_queue_depth"], media_q.qsize())
+
+        def put_spool(item: str | object) -> None:
+            while True:
+                try:
+                    speech_spool.put(item, timeout=0.05)
+                    return
+                except queue.Full:
+                    if cancelled():
+                        try:
+                            speech_spool.get_nowait()
+                        except queue.Empty:
+                            pass
 
         def schedule_unit(text: str) -> None:
             if cancelled():
@@ -201,7 +222,7 @@ class V10MediaPipeline:
                         "answer": grounding.forced_answer,
                         "meta": {"grounding_short_circuit": True, "client_ttft_ms": 0.0},
                     })
-                    speech_spool.put(grounding.forced_answer)
+                    put_spool(grounding.forced_answer)
                     shared["llm_done_ms"] = rel_ms()
                     shared["llm_meta"] = {
                         "type": "done",
@@ -236,7 +257,7 @@ class V10MediaPipeline:
                             "meta": event,
                         })
                         if delta:
-                            speech_spool.put(delta)
+                            put_spool(delta)
                             shared["max_speech_spool_depth"] = max(
                                 shared["max_speech_spool_depth"], speech_spool.qsize()
                             )
@@ -255,7 +276,7 @@ class V10MediaPipeline:
                 cancel.set()
             finally:
                 llm_done.set()
-                speech_spool.put(_SPOOL_DONE)
+                put_spool(_SPOOL_DONE)
 
         def speech_segmenter_worker() -> None:
             chunker = AdaptiveSpeechUnitChunker(
@@ -356,7 +377,14 @@ class V10MediaPipeline:
                                 if prior_min_lead is None
                                 else min(float(prior_min_lead), producer_lead_ms)
                             )
-                            final_pcm_parts.append(raw)
+                            if not shared["replay_truncated"]:
+                                replay_bytes = shared["replay_bytes"] + len(raw)
+                                if replay_bytes <= self.settings.tts_replay_max_bytes:
+                                    final_pcm_parts.append(raw)
+                                    shared["replay_bytes"] = replay_bytes
+                                else:
+                                    final_pcm_parts.clear()
+                                    shared["replay_truncated"] = True
                             backend = str(tts_event.get("upstream_backend") or backend)
                             streaming_mode = str(tts_event.get("streaming_mode") or streaming_mode)
                             profile = str(tts_event.get("profile") or profile)
@@ -431,7 +459,7 @@ class V10MediaPipeline:
             if cancelled() and not cancellation_announced:
                 cancellation_announced = True
                 units.close()
-                speech_spool.put(_SPOOL_DONE)
+                put_spool(_SPOOL_DONE)
                 while True:
                     try:
                         media_q.get_nowait()
@@ -488,7 +516,7 @@ class V10MediaPipeline:
             return
 
         final_audio_path = None
-        if final_pcm_parts:
+        if final_pcm_parts and not shared["replay_truncated"]:
             save_fn = getattr(self.core.tts, "save_pcm_wav", None)
             if callable(save_fn):
                 final_audio_path = save_fn(b"".join(final_pcm_parts), prefix="v10-final")
@@ -532,6 +560,7 @@ class V10MediaPipeline:
             "llm_reader_tts_backpressure_ms": 0.0,
             "max_speech_spool_depth": shared["max_speech_spool_depth"],
             "max_control_queue_depth": shared["max_control_queue_depth"],
+            "control_and_spool_capacity": shared["queue_capacity"],
             "stream_chunk_count": shared["stream_chunk_count"],
             "media_queue_capacity": self.settings.tts_audio_queue_max,
             "max_media_queue_depth": shared["max_media_queue_depth"],
@@ -561,6 +590,7 @@ class V10MediaPipeline:
             "max_inter_pcm_gap_ms": max(gaps) if gaps else None,
             "p95_inter_pcm_gap_ms": p95_gap,
             "final_audio_path": final_audio_path,
+            "replay_truncated": shared["replay_truncated"],
             "units": unit_metrics,
             "pcm_trace": shared["pcm_trace"],
         }

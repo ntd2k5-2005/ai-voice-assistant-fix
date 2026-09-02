@@ -9,7 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from voice_app.conversation import InMemoryConversationHistory, TurnState
-from voice_app.web import TurnManager, create_app
+from voice_app.web import TurnManager, _same_origin, create_app
 
 
 def test_history_is_isolated_and_only_completed_turns_reach_the_prompt():
@@ -137,6 +137,17 @@ def test_control_event_log_can_resume_after_a_cursor():
     assert second["event_sequence"] == first["event_sequence"] + 1
 
 
+def test_audio_log_replays_by_chunk_cursor_without_competing_consumers():
+    manager = _manager(_Pipeline())
+    session = manager.start(query_text="media reconnect")
+    assert session.finished.wait(2)
+    first_reader = manager.next_audio(session, 0, 0)
+    retry_reader = manager.next_audio(session, 0, 0)
+    assert first_reader is not None and retry_reader is not None
+    assert first_reader.meta["chunk_index"] == retry_reader.meta["chunk_index"] == 1
+    assert manager.next_audio(session, 1, 0) is None
+
+
 def test_public_conversation_and_turn_contract():
     app = create_app()
     app.state.turn_manager.pipeline = _Pipeline()
@@ -191,3 +202,16 @@ def test_public_cancel_contract_is_idempotent_and_interrupts():
         )
         assert repeated.status_code == 200
         assert repeated.json()["state"] == "interrupted"
+
+
+def test_browser_mutations_and_websockets_require_same_origin():
+    assert _same_origin({"host": "demo.example", "origin": "https://demo.example"})
+    assert _same_origin({"host": "127.0.0.1:7860"})
+    assert not _same_origin({"host": "demo.example", "origin": "https://evil.example"})
+    app = create_app()
+    with TestClient(app) as client:
+        rejected = client.post(
+            "/api/conversations",
+            headers={"Origin": "https://evil.example"},
+        )
+        assert rejected.status_code == 403

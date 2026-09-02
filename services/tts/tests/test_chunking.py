@@ -88,13 +88,33 @@ def test_v10_realtime_rejects_missing_native_stream(monkeypatch):
         )
 
 
-def test_v10_runtime_is_onnx_streaming_profile():
+def test_v10_runtime_is_onnx_streaming_profile(monkeypatch):
     assert api.TTS_PROFILE == "realtime"
     assert api.VIENEU_BACKEND == "onnx"
     assert api.VIENEU_DEVICE == "cpu"
     assert api.DEFAULT_GENERATION_MODE == "stream"
     assert 176 <= api.STREAM_MAX_CHARS <= 224
+    monkeypatch.setattr(api, "TTS_BACKBONE_MODEL_ID", None)
+    monkeypatch.setattr(api, "TTS_BACKBONE_REVISION", None)
     assert api._model_init_kwargs() == {"mode": api.VIENEU_MODE, "backend": "onnx"}
+
+
+def test_model_init_uses_exact_pinned_snapshot(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "TTS_BACKBONE_MODEL_ID", "org/model")
+    monkeypatch.setattr(api, "TTS_BACKBONE_REVISION", "abc123")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    snapshot = tmp_path / "hub" / "models--org--model" / "snapshots" / "abc123"
+    (snapshot / "onnx_int8").mkdir(parents=True)
+    assert api._model_init_kwargs()["backbone_repo"] == str(snapshot.resolve())
+    assert api._model_init_kwargs()["onnx_dir"] == str((snapshot / "onnx_int8").resolve())
+
+
+def test_missing_pinned_snapshot_fails_fast(monkeypatch, tmp_path):
+    monkeypatch.setattr(api, "TTS_BACKBONE_MODEL_ID", "org/model")
+    monkeypatch.setattr(api, "TTS_BACKBONE_REVISION", "missing")
+    monkeypatch.setenv("HF_HOME", str(tmp_path))
+    with pytest.raises(RuntimeError, match="Pinned TTS snapshot is missing"):
+        api._model_init_kwargs()
 
 
 def test_warmup_measurement_reports_rtf_and_gaps(monkeypatch):

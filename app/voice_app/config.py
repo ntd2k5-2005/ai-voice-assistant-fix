@@ -136,7 +136,7 @@ class AppSettings(BaseSettings):
     knowledge_upload_max_bytes: int = 50 * 1024 * 1024
 
     # Browser VAD defaults are explicit and returned by the gateway. The VAD
-    # runs on live PCM frames; MediaRecorder is only a compatibility PTT path.
+    # runs on live PCM frames for both VAD and push-to-talk.
     vad_threshold_db: float = -42.0
     vad_pre_roll_ms: int = 300
     vad_min_speech_ms: int = 250
@@ -144,6 +144,7 @@ class AppSettings(BaseSettings):
     vad_activation_frames: int = 3
     vad_barge_in_debounce_ms: int = 180
     vad_max_utterance_ms: int = 120000
+    tts_replay_max_bytes: int = 64 * 1024 * 1024
 
     demo_host: str = "0.0.0.0"
     demo_port: int = 7860
@@ -268,6 +269,8 @@ class AppSettings(BaseSettings):
             raise ConfigurationError("conversation bounds must be positive")
         if min(self.voice_upload_max_bytes, self.knowledge_upload_max_bytes) < 1024:
             raise ConfigurationError("upload limits must be at least 1024 bytes")
+        if self.tts_replay_max_bytes < 1024 * 1024:
+            raise ConfigurationError("tts_replay_max_bytes must be at least 1 MiB")
         if not -80 <= self.vad_threshold_db <= -10:
             raise ConfigurationError("vad_threshold_db must be in [-80, -10]")
         if min(

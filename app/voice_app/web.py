@@ -14,9 +14,10 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import numpy as np
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -82,6 +83,9 @@ class TurnSession:
     event_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=2048))
     event_condition: threading.Condition = field(default_factory=threading.Condition)
     event_sequence: int = 0
+    audio_log: deque[AudioPacket] = field(default_factory=lambda: deque(maxlen=512))
+    audio_condition: threading.Condition = field(default_factory=threading.Condition)
+    audio_finished: bool = False
 
 
 class TurnManager:
@@ -172,6 +176,27 @@ class TurnManager:
                 session.event_condition.wait(remaining)
 
     @staticmethod
+    def next_audio(session: TurnSession, after: int, timeout: float = 15.0) -> AudioPacket | None:
+        deadline = time.monotonic() + timeout
+        with session.audio_condition:
+            while True:
+                match = next(
+                    (
+                        packet for packet in session.audio_log
+                        if int(packet.meta.get("chunk_index") or 0) > after
+                    ),
+                    None,
+                )
+                if match is not None:
+                    return match
+                if session.audio_finished:
+                    return None
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    continue
+                session.audio_condition.wait(remaining)
+
+    @staticmethod
     def _drain(target: queue.Queue) -> None:
         while True:
             try:
@@ -189,6 +214,10 @@ class TurnManager:
         self.history.transition(session.conversation_id, session.turn_id, state)
         self._drain(session.audio_queue)
         session.audio_queue.put_nowait(None)
+        with session.audio_condition:
+            session.audio_log.clear()
+            session.audio_finished = True
+            session.audio_condition.notify_all()
         self._drain(session.event_queue)
         with session.event_condition:
             session.event_log.clear()
@@ -272,12 +301,19 @@ class TurnManager:
                         # queue is finite in practice; the TTS/media worker remains
                         # single-threaded and bounded upstream.
                         packet = AudioPacket(pcm16, packet_meta)
-                        while not session.cancel_event.is_set():
+                        with session.audio_condition:
+                            session.audio_log.append(packet)
+                            session.audio_condition.notify_all()
+                        # Compatibility queue for direct Python consumers. The
+                        # public media path reads the bounded cursor log.
+                        try:
+                            session.audio_queue.put_nowait(packet)
+                        except queue.Full:
                             try:
-                                session.audio_queue.put(packet, timeout=0.05)
-                                break
-                            except queue.Full:
-                                continue
+                                session.audio_queue.get_nowait()
+                            except queue.Empty:
+                                pass
+                            session.audio_queue.put_nowait(packet)
                         self._emit(session, packet_meta)
                     else:
                         if event.get("type") == "tts_done":
@@ -293,6 +329,9 @@ class TurnManager:
                     )
                     self._emit(session, {"type": "error", "stage": "web-media", "error": str(exc)})
             finally:
+                with session.audio_condition:
+                    session.audio_finished = True
+                    session.audio_condition.notify_all()
                 try:
                     session.audio_queue.put_nowait(None)
                 except queue.Full:
@@ -365,6 +404,23 @@ async def _read_upload_limited(upload: UploadFile, limit: int) -> bytes:
     return b"".join(parts)
 
 
+def _same_origin(headers) -> bool:
+    origin = headers.get("origin")
+    if not origin:
+        # CLI/service clients do not send Origin. Browser requests do.
+        return True
+    try:
+        origin_host = urlsplit(origin).netloc.casefold()
+    except ValueError:
+        return False
+    request_host = (
+        headers.get("x-forwarded-host")
+        or headers.get("host")
+        or ""
+    ).split(",", 1)[0].strip().casefold()
+    return bool(origin_host and request_host and origin_host == request_host)
+
+
 def create_app():
     settings = AppSettings()
     orchestrator = VoiceOrchestrator(settings)
@@ -389,6 +445,16 @@ def create_app():
     app = FastAPI(title="Eureka Voice Assistant V10", version="0.10.0", lifespan=lifespan)
     app.state.turn_manager = manager
     app.mount("/assets", StaticFiles(directory=web_dir), name="assets")
+
+    @app.middleware("http")
+    async def reject_cross_origin_mutations(request: Request, call_next):
+        if (
+            request.url.path.startswith("/api/")
+            and request.method not in {"GET", "HEAD", "OPTIONS"}
+            and not _same_origin(request.headers)
+        ):
+            return JSONResponse(status_code=403, content={"detail": "Cross-origin mutation rejected"})
+        return await call_next(request)
 
     @app.get("/")
     def index():
@@ -554,6 +620,9 @@ def create_app():
 
     @app.websocket("/ws/turn/{turn_id}")
     async def turn_control(websocket: WebSocket, turn_id: str):
+        if not _same_origin(websocket.headers):
+            await websocket.close(code=4403, reason="Cross-origin WebSocket rejected")
+            return
         try:
             session = manager.get(turn_id)
         except KeyError:
@@ -605,19 +674,24 @@ def create_app():
         measured latency can therefore be attributed without guessing how an
         unframed HTTP response body was split or coalesced.
         """
+        if not _same_origin(websocket.headers):
+            await websocket.close(code=4403, reason="Cross-origin WebSocket rejected")
+            return
         try:
             session = manager.get(turn_id)
         except KeyError:
             await websocket.close(code=4404, reason="Unknown turn")
             return
         await websocket.accept()
+        cursor = int(websocket.query_params.get("after", "0") or 0)
         try:
             while True:
-                packet = await asyncio.to_thread(session.audio_queue.get)
+                packet = await asyncio.to_thread(manager.next_audio, session, cursor, 15.0)
                 if packet is None:
                     await websocket.send_json({"type": "end"})
                     break
                 await websocket.send_bytes(encode_pcm_websocket_packet(packet))
+                cursor = int(packet.meta.get("chunk_index") or cursor)
         except WebSocketDisconnect:
             return
         finally:

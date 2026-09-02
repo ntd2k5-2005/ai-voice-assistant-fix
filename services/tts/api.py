@@ -90,6 +90,24 @@ def _cached_huggingface_revision(model_id: str | None) -> str | None:
         return None
 
 
+def _pinned_snapshot_path(model_id: str | None, revision: str | None) -> Path | None:
+    if not model_id or not revision:
+        return None
+    cache_root = Path(os.getenv("HF_HOME", "")) / "hub"
+    snapshot = (
+        cache_root
+        / ("models--" + model_id.replace("/", "--"))
+        / "snapshots"
+        / revision
+    )
+    if not snapshot.is_dir():
+        raise RuntimeError(
+            f"Pinned TTS snapshot is missing: {model_id}@{revision}. "
+            "Run the repository setup script before starting the service."
+        )
+    return snapshot.resolve()
+
+
 def _voice_identifier(value: Any) -> Any:
     if isinstance(value, (list, tuple)) and len(value) >= 2:
         return value[1]
@@ -134,7 +152,19 @@ def _resolve_generation_mode(requested: str) -> str:
 def _model_init_kwargs() -> dict[str, Any]:
     # Match VieNeu's published realtime path exactly: Vieneu(backend="onnx").
     # Do not pass device="auto" on CUDA hosts.
-    return {"mode": VIENEU_MODE, "backend": "onnx"}
+    values: dict[str, Any] = {"mode": VIENEU_MODE, "backend": "onnx"}
+    pinned = _pinned_snapshot_path(TTS_BACKBONE_MODEL_ID, TTS_BACKBONE_REVISION)
+    if pinned is not None:
+        # VieNeu has no revision parameter. An immutable snapshot path prevents
+        # a silent main-branch update while preserving the selected checkpoint.
+        values["backbone_repo"] = str(pinned)
+        onnx_dir = pinned / "onnx_int8"
+        if not onnx_dir.is_dir():
+            raise RuntimeError(f"Pinned TTS ONNX directory is missing: {onnx_dir}")
+        # Upstream's ONNX loader otherwise treats every string as a Hub repo id,
+        # even when backbone_repo is a local directory.
+        values["onnx_dir"] = str(onnx_dir)
+    return values
 
 
 def iter_model_audio_traced(
@@ -397,7 +427,11 @@ def health_ready():
             "backbone": {
                 "model_id": TTS_BACKBONE_MODEL_ID,
                 "requested_revision": TTS_BACKBONE_REVISION,
-                "resolved_revision": _cached_huggingface_revision(TTS_BACKBONE_MODEL_ID),
+                "resolved_revision": (
+                    Path(str(getattr(getattr(model, "engine", None), "checkpoint_path", ""))).name
+                    or None
+                ),
+                "load_source": "pinned-local-snapshot",
             },
             "codec": {
                 "model_id": TTS_CODEC_MODEL_ID,
