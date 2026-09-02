@@ -14,7 +14,10 @@ def test_v10_setup_reproduces_locked_vieneu_environment():
 def test_v10_tts_pins_onnx_and_runs_multi_shape_warmup():
     text=(ROOT/"services/tts/api.py").read_text(encoding="utf-8")
     assert 'VIENEU_BACKEND = "onnx"' in text
-    assert 'return {"mode": VIENEU_MODE, "backend": "onnx"}' in text
+    assert '"backend": "onnx"' in text
+    assert '_pinned_snapshot_path(TTS_BACKBONE_MODEL_ID, TTS_BACKBONE_REVISION)' in text
+    assert 'values["backbone_repo"] = str(pinned)' in text
+    assert 'values["onnx_dir"] = str(onnx_dir)' in text
     assert '"profiles": ["short", "medium"]' in text
     assert '"environment_policy": "uv-sync-frozen"' in text
     assert '"decoupled-speech-units-websocket-audioworklet-v10"' in text
@@ -45,7 +48,9 @@ def test_v10_web_control_and_media_routes():
     assert 'original_name = _safe_filename(file.filename' in web
     assert 'resolved_id = (document_id or "").strip() or Path(original_name).stem' in web
     assert '@app.websocket("/ws/turn/{turn_id}/audio")' in web
-    assert 'session.audio_queue.put_nowait(AudioPacket(pcm16, packet_meta))' in web
+    assert 'session.audio_log.append(packet)' in web
+    assert 'manager.next_audio' in web
+    assert 'websocket.query_params.get("after"' in web
     assert 'encode_pcm_websocket_packet(packet)' in web
 
 def test_knowledge_management_remains_available():
