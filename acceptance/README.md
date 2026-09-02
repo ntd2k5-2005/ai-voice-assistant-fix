@@ -24,6 +24,10 @@ Mỗi thư mục con chứa audio thật và một file sidecar cùng tên, ví 
 
 Không commit audio nhạy cảm hoặc dữ liệu không có quyền sử dụng.
 
+Các fixture PCM/VAD sinh tổng hợp trong automated tests chỉ chứng minh
+`FUNCTIONAL_PASS` cho state/endpoint/cancellation. Chúng không được tính là
+`QUALITY_VALIDATED` cho chất lượng nhận dạng, giọng đọc hay giọng vùng miền.
+
 ## RAG JSONL
 
 - `answerable.jsonl`: `case_id`, `query`, `expected_answer_facts` và

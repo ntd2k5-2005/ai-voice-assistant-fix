@@ -3,13 +3,19 @@
 V10 tách ba đường độc lập: control, speech scheduling và media.
 
 ```text
-LLM NDJSON reader
-   |-- WebSocket control queue -> browser UI
-   `-- unbounded text spool -> speech segmentation worker -> bounded TTS queue
+ConversationHistory (in-memory; replaceable by SQLite/Redis)
+   -> Turn state machine + generation ownership
+      -> LLM NDJSON reader
+   |     |-- bounded replayable WebSocket control -> browser chat
+   |     `-- bounded token-capacity spool -> speech segmentation -> bounded TTS queue
                                                         -> VieNeu ONNX infer_stream
                                                         -> bounded PCM queue
                                                         -> framed WebSocket PCM
-                                                        -> AudioWorklet ring buffer
+                                                        -> epoch-owned bounded AudioWorklet ring buffer
+
+Browser mic AudioWorklet -> PTT or VAD (pre-roll/noise gate/endpoint)
+                         -> speech start -> flush playout -> cancel old turn
+                         -> WAV upload -> new owned turn
 ```
 
 ## Invariants
@@ -21,3 +27,5 @@ LLM NDJSON reader
 - Browser là nguồn sự thật cho buffered frames, underrun và rebuffer.
 - AudioWorklet rebuffer sau underrun; không tạo hàng trăm AudioBufferSourceNode.
 - VieNeu realtime runtime pin ONNX/CPU từ upstream lock bằng `uv sync --frozen`.
+- Factual no-context không đi qua LLM; social interaction không bị ép RAG refusal.
+- Chỉ completed turn đi vào multi-turn prompt; interrupted/failed turn không làm bẩn history.

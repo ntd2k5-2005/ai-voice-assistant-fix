@@ -4,6 +4,8 @@ Pipeline chính:
 
 ```text
 Microphone / text
+      -> PTT or VAD (pre-roll + endpoint + barge-in)
+      -> conversation / turn ownership
       -> STT
       -> RAG
       -> LLM token stream
@@ -16,6 +18,11 @@ Microphone / text
              -> Browser AudioWorklet rebuffering ring buffer
              -> speaker
 ```
+
+UI chính hỗ trợ chat nhiều lượt, reset conversation, PTT/VAD selector, ngắt lời,
+realtime text, provenance, quản lý tài liệu và runtime health. Khi VAD phát hiện
+người dùng nói lúc assistant đang phát, browser flush AudioWorklet trước, hủy
+turn cũ, loại stale PCM theo epoch rồi gửi câu mới.
 
 V10 giữ các phần đã chứng minh đúng ở V9 (locked VieNeu runtime, semantic speech units, AudioWorklet) và sửa hai vấn đề đo được: TTS queue không còn chặn LLM/control stream, và control plane chuyển từ SSE sang WebSocket để tránh proxy buffering. AudioWorklet dùng ring buffer thật và rebuffer sau underrun để tránh chuỗi micro-stutter.
 
@@ -60,10 +67,13 @@ Upload giữ nguyên filename người dùng và mặc định `document_id` the
 ```bash
 .venvs/app/bin/python scripts/test_project.py
 .venvs/app/bin/python scripts/verify_services.py --profile local-balanced
+.venvs/app/bin/python scripts/verify_product.py --include-voice
 .venvs/app/bin/python scripts/benchmark_tts_v10.py --profile local-balanced
 ```
 
 Benchmark là công cụ chẩn đoán, không phải điều kiện để mở UI demo.
+`verify_product.py` là functional E2E thật: conversation, no-answer, upload,
+provenance, LLM/TTS, cancellation stale-audio và voice round-trip.
 
 ## Model manifest và runtime profiles
 
