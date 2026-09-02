@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import shutil
 import sys
 
 
@@ -9,6 +10,8 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from runtime_config import load_manifest, load_profile, service_environments  # noqa: E402
+from prefetch_tts import BACKBONE_FILES, CODEC_FILES, prefetch_tts  # noqa: E402
+from verify_product import service_url  # noqa: E402
 from validate_acceptance import (  # noqa: E402
     JSONL_REQUIREMENTS,
     STT_GROUPS,
@@ -64,6 +67,50 @@ def test_local_balanced_profile_builds_isolated_service_environments():
     assert values["web"]["RUNTIME_PROFILE"] == "local-balanced"
     assert values["web"]["MODEL_MANIFEST_ID"] == manifest["manifest_id"]
     assert all(value["HF_HUB_DISABLE_TELEMETRY"] == "1" for value in values.values())
+
+
+def test_product_verifier_resolves_tts_url_from_runtime_profile():
+    assert service_url("local-balanced", "tts") == "http://127.0.0.1:8103"
+    assert service_url("colab-t4", "tts") == "http://127.0.0.1:8003"
+
+
+def test_tts_prefetch_uses_runtime_hf_home_and_exact_manifest_revisions(tmp_path):
+    project = tmp_path / "repo"
+    shutil.copytree(ROOT / "config", project / "config")
+    calls = []
+
+    def fake_snapshot_download(**kwargs):
+        calls.append(kwargs)
+        snapshot = (
+            Path(kwargs["cache_dir"])
+            / ("models--" + kwargs["repo_id"].replace("/", "--"))
+            / "snapshots"
+            / kwargs["revision"]
+        )
+        snapshot.mkdir(parents=True)
+        for name in kwargs["allow_patterns"]:
+            artifact = snapshot / name
+            artifact.parent.mkdir(parents=True, exist_ok=True)
+            artifact.touch()
+        return str(snapshot)
+
+    result = prefetch_tts(
+        project,
+        "colab-t4",
+        snapshot_download=fake_snapshot_download,
+    )
+    expected_hf_home = (project / ".model_cache" / "huggingface").resolve()
+    assert {Path(call["cache_dir"]).resolve() for call in calls} == {
+        expected_hf_home / "hub"
+    }
+    assert result["backbone"]["revision"] == (
+        "2da0efab622a1722125991736524f080b751ef5b"
+    )
+    assert result["codec"]["revision"] == (
+        "ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae"
+    )
+    assert calls[0]["allow_patterns"] == list(BACKBONE_FILES)
+    assert calls[1]["allow_patterns"] == list(CODEC_FILES)
 
 
 def test_offline_runtime_forces_huggingface_components_to_cache_only():

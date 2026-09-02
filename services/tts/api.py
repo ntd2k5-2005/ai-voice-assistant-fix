@@ -8,7 +8,7 @@ import struct
 import threading
 import time
 from collections.abc import Iterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any, Literal
 
@@ -71,23 +71,13 @@ streaming_supported = False
 resolved_backend: str | None = None
 warmup_metrics: dict[str, Any] | None = None
 resolved_model_storage_root: str | None = None
+enforced_download_revisions: dict[str, str] = {}
 
 # Optional trace framing used by the V10 application client.  HTTP is allowed
 # to split or coalesce body writes, so native generator yields cannot otherwise
 # be correlated with client reads.  Benchmark/legacy callers keep raw float32.
 _TRACE_MAGIC = b"TTS1"
 _TRACE_HEADER = struct.Struct("<4sIIIQQ")
-
-
-def _cached_huggingface_revision(model_id: str | None) -> str | None:
-    if not model_id:
-        return None
-    cache_root = Path(os.getenv("HF_HOME", "")) / "hub"
-    ref = cache_root / ("models--" + model_id.replace("/", "--")) / "refs" / "main"
-    try:
-        return ref.read_text(encoding="utf-8").strip() or None
-    except OSError:
-        return None
 
 
 def _pinned_snapshot_path(model_id: str | None, revision: str | None) -> Path | None:
@@ -106,6 +96,57 @@ def _pinned_snapshot_path(model_id: str | None, revision: str | None) -> Path | 
             "Run the repository setup script before starting the service."
         )
     return snapshot.resolve()
+
+
+@contextmanager
+def _pinned_huggingface_downloads():
+    """Inject immutable revisions into VieNeu's unpinned Hub file downloads.
+
+    VieNeu v3 Turbo exposes a local path for its backbone but not for the ONNX
+    codec. Its lower-level loader does use huggingface_hub, whose revision
+    parameter lets this service enforce the manifest without changing VieNeu.
+    """
+    pins = {
+        model_id: revision
+        for model_id, revision in (
+            (TTS_BACKBONE_MODEL_ID, TTS_BACKBONE_REVISION),
+            (TTS_CODEC_MODEL_ID, TTS_CODEC_REVISION),
+        )
+        if model_id and revision
+    }
+    if not pins:
+        yield
+        return
+
+    import huggingface_hub
+
+    original = huggingface_hub.hf_hub_download
+
+    def pinned_download(repo_id, *args, **kwargs):
+        expected = pins.get(str(repo_id))
+        if expected is None:
+            return original(repo_id, *args, **kwargs)
+        requested = kwargs.get("revision")
+        if requested is not None and str(requested) != expected:
+            raise RuntimeError(
+                f"TTS Hub revision conflict for {repo_id}: "
+                f"manifest={expected} requested={requested}"
+            )
+        kwargs["revision"] = expected
+        downloaded = original(repo_id, *args, **kwargs)
+        if expected not in Path(downloaded).parts:
+            raise RuntimeError(
+                f"TTS Hub download did not resolve the pinned revision for {repo_id}: "
+                f"expected={expected} path={downloaded}"
+            )
+        enforced_download_revisions[str(repo_id)] = expected
+        return downloaded
+
+    huggingface_hub.hf_hub_download = pinned_download
+    try:
+        yield
+    finally:
+        huggingface_hub.hf_hub_download = original
 
 
 def _voice_identifier(value: Any) -> Any:
@@ -326,7 +367,7 @@ def _package_version(name: str) -> str | None:
 async def lifespan(app: FastAPI):
     global model, voices, load_error, load_time_seconds
     global streaming_supported, resolved_backend, warmup_metrics
-    global resolved_model_storage_root
+    global resolved_model_storage_root, enforced_download_revisions
 
     if Vieneu is None:
         load_error = "Missing dependency 'vieneu'"
@@ -335,13 +376,15 @@ async def lifespan(app: FastAPI):
 
     started = time.perf_counter()
     try:
+        enforced_download_revisions = {}
         model_path = os.getenv("MODEL_PATH", "./models/vieneu-tts-v3-turbo")
         os.environ.setdefault("HF_HOME", model_path)
         resolved_model_storage_root = str(
             Path(os.environ["HF_HOME"]).expanduser().resolve(strict=False)
         )
 
-        model = Vieneu(**_model_init_kwargs())
+        with _pinned_huggingface_downloads():
+            model = Vieneu(**_model_init_kwargs())
         voices = list(model.list_preset_voices())
         load_time_seconds = time.perf_counter() - started
         streaming_supported = callable(getattr(model, "infer_stream", None)) and not FORCE_BLOCKING
@@ -432,11 +475,33 @@ def health_ready():
                     or None
                 ),
                 "load_source": "pinned-local-snapshot",
+                "revision_policy": {
+                    "status": "enforced",
+                    "mechanism": "immutable-local-snapshot-path",
+                    "limitation": None,
+                },
             },
             "codec": {
                 "model_id": TTS_CODEC_MODEL_ID,
                 "requested_revision": TTS_CODEC_REVISION,
-                "resolved_revision": _cached_huggingface_revision(TTS_CODEC_MODEL_ID),
+                "resolved_revision": enforced_download_revisions.get(
+                    str(TTS_CODEC_MODEL_ID)
+                ),
+                "revision_policy": {
+                    "status": (
+                        "enforced"
+                        if enforced_download_revisions.get(str(TTS_CODEC_MODEL_ID))
+                        == TTS_CODEC_REVISION
+                        else "not-enforced"
+                    ),
+                    "mechanism": "huggingface-download-revision-override",
+                    "limitation": (
+                        None
+                        if enforced_download_revisions.get(str(TTS_CODEC_MODEL_ID))
+                        == TTS_CODEC_REVISION
+                        else "VieNeu did not load the codec through the pinned Hub path"
+                    ),
+                },
             },
         },
         "stream_max_chars": STREAM_MAX_CHARS,

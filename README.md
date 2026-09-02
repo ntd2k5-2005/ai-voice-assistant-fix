@@ -67,7 +67,7 @@ Upload giữ nguyên filename người dùng và mặc định `document_id` the
 ```bash
 .venvs/app/bin/python scripts/test_project.py
 .venvs/app/bin/python scripts/verify_services.py --profile local-balanced
-.venvs/app/bin/python scripts/verify_product.py --include-voice
+.venvs/app/bin/python scripts/verify_product.py --profile local-balanced --include-voice
 .venvs/app/bin/python scripts/benchmark_tts_v10.py --profile local-balanced
 ```
 

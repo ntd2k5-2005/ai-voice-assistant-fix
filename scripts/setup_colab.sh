@@ -54,6 +54,9 @@ UV_PROJECT_ENVIRONMENT="$VENVS/tts" UV_PYTHON="$PYTHON_VERSION" "$UV" sync --pro
 # do not replace VieNeu/onnxruntime and keep the upstream CPU lock intact.
 "$UV" pip install --python "$VENVS/tts/bin/python" "fastapi>=0.115,<1" "uvicorn[standard]>=0.30,<1" "pydantic>=2.8,<3" "pytest>=8,<10"
 
+echo "==> Pinned TTS artifacts (clean-cache reproducibility)"
+"$VENVS/tts/bin/python" "$ROOT/scripts/prefetch_tts.py" --profile colab-t4
+
 echo "==> App V10"
 "$UV" pip install --python "$VENVS/app/bin/python" -e "$ROOT/app[demo,dev]"
 

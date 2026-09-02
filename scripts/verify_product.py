@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import struct
 import tempfile
 import time
@@ -14,8 +15,20 @@ import numpy as np
 import websockets
 from scipy.io import wavfile
 
+from runtime_config import load_profile
+
 
 PCM_HEADER = struct.Struct("<4sHHIIIIQQQQQQ")
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def service_url(profile_name: str, service: str) -> str:
+    resolved_name, profile = load_profile(ROOT, profile_name)
+    try:
+        port = profile["ports"][service]
+    except KeyError:
+        raise ValueError(f"runtime profile {resolved_name!r} has no {service!r} service") from None
+    return f"http://127.0.0.1:{port}"
 
 
 async def consume_control(base_ws: str, turn_id: str) -> list[dict]:
@@ -100,7 +113,11 @@ async def start_text(client: httpx.AsyncClient, conversation_id: str, query: str
     return response.json()
 
 
-async def main_async(base_url: str, include_voice: bool) -> dict:
+async def main_async(
+    base_url: str,
+    include_voice: bool,
+    profile_name: str | None = None,
+) -> dict:
     base_url = base_url.rstrip("/")
     base_ws = base_url.replace("https://", "wss://").replace("http://", "ws://")
     timeout = httpx.Timeout(240.0)
@@ -109,8 +126,16 @@ async def main_async(base_url: str, include_voice: bool) -> dict:
         health = (await client.get("/health/ready")).raise_for_status().json()
         if not health.get("ready"):
             raise RuntimeError("gateway is not ready")
-        report["profile"] = health["runtime"]["profile"]
+        runtime_profile = health["runtime"]["profile"]
+        if profile_name is not None and profile_name != runtime_profile:
+            raise RuntimeError(
+                f"gateway profile mismatch: expected={profile_name} actual={runtime_profile}"
+            )
+        profile_name = profile_name or runtime_profile
+        tts_url = service_url(profile_name, "tts")
+        report["profile"] = profile_name
         report["manifest"] = health["runtime"]["model_manifest_id"]
+        report["service_urls"] = {"tts": tts_url}
 
         conversation = (await client.post("/api/conversations")).raise_for_status().json()
         conversation_id = conversation["conversation_id"]
@@ -184,7 +209,7 @@ async def main_async(base_url: str, include_voice: bool) -> dict:
 
         if include_voice:
             tts = await client.post(
-                "http://127.0.0.1:8103/api/tts",
+                f"{tts_url}/api/tts",
                 json={
                     "text": "Xin chào, đây là kiểm tra hội thoại bằng giọng nói.",
                     "voice_index": 2,
@@ -225,11 +250,16 @@ async def main_async(base_url: str, include_voice: bool) -> dict:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Real functional product E2E")
     parser.add_argument("--base-url", default="http://127.0.0.1:7860")
+    parser.add_argument(
+        "--profile",
+        default=os.getenv("RUNTIME_PROFILE"),
+        help="Expected runtime profile; otherwise resolve it from gateway health",
+    )
     parser.add_argument("--include-voice", action="store_true")
     args = parser.parse_args()
     print(
         json.dumps(
-            asyncio.run(main_async(args.base_url, args.include_voice)),
+            asyncio.run(main_async(args.base_url, args.include_voice, args.profile)),
             # Windows PowerShell may still expose a CP1252 stdout even though
             # every HTTP payload is UTF-8. Escaping keeps the verifier portable.
             ensure_ascii=True,

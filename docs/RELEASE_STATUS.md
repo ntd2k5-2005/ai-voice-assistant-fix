@@ -8,7 +8,8 @@ Nhãn trong tài liệu này có nghĩa:
 
 ## FUNCTIONAL_PASS
 
-- Runtime profile/manifest/port và exact model identity.
+- Runtime profile/manifest/port và exact model identity; TTS backbone/codec
+  revision phải được health và release verifier xác nhận là `enforced`.
 - Conversation isolation, lifecycle, completed-only history và reset.
 - Text/voice turn, WebSocket control cursor reconnect và PCM cursor reconnect.
 - Cancellation/barge-in ownership; stale control/PCM bị loại.

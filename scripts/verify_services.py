@@ -81,10 +81,23 @@ def main() -> None:
     tts_artifacts = (payloads.get("tts") or {}).get("model_artifacts") or {}
     for name in ("backbone", "codec"):
         expected = tts_manifest.get(f"{name}_revision")
-        actual = (tts_artifacts.get(name) or {}).get("resolved_revision")
+        artifact = tts_artifacts.get(name) or {}
+        actual = artifact.get("resolved_revision")
         if expected and actual != expected:
             failed = True
             print(f"TTS {name} revision does not match the model manifest")
+        policy = artifact.get("revision_policy") or {}
+        if expected and policy.get("status") != "enforced":
+            failed = True
+            print(
+                f"TTS {name} revision is not enforced: "
+                f"mechanism={policy.get('mechanism')} limitation={policy.get('limitation')}"
+            )
+        elif expected:
+            print(
+                f"TTS {name} revision enforcement PASS: "
+                f"{policy.get('mechanism')}"
+            )
 
     print(f"PROFILE {profile_name} verification {'FAIL' if failed else 'PASS'}")
 

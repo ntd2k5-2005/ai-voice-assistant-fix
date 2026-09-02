@@ -1,3 +1,7 @@
+import sys
+from pathlib import Path
+from types import SimpleNamespace
+
 import numpy as np
 import pytest
 
@@ -115,6 +119,34 @@ def test_missing_pinned_snapshot_fails_fast(monkeypatch, tmp_path):
     monkeypatch.setenv("HF_HOME", str(tmp_path))
     with pytest.raises(RuntimeError, match="Pinned TTS snapshot is missing"):
         api._model_init_kwargs()
+
+
+def test_codec_hub_download_is_forced_to_manifest_revision(monkeypatch, tmp_path):
+    calls = []
+    codec_revision = "codec-commit"
+
+    def fake_download(repo_id, filename, **kwargs):
+        calls.append((repo_id, filename, kwargs))
+        path = tmp_path / "snapshots" / kwargs["revision"] / filename
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.touch()
+        return str(path)
+
+    fake_hub = SimpleNamespace(hf_hub_download=fake_download)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", fake_hub)
+    monkeypatch.setattr(api, "TTS_BACKBONE_MODEL_ID", None)
+    monkeypatch.setattr(api, "TTS_BACKBONE_REVISION", None)
+    monkeypatch.setattr(api, "TTS_CODEC_MODEL_ID", "org/codec")
+    monkeypatch.setattr(api, "TTS_CODEC_REVISION", codec_revision)
+    monkeypatch.setattr(api, "enforced_download_revisions", {})
+
+    with api._pinned_huggingface_downloads():
+        downloaded = fake_hub.hf_hub_download("org/codec", "codec.onnx")
+
+    assert Path(downloaded).parts[-2] == codec_revision
+    assert calls[0][2]["revision"] == codec_revision
+    assert api.enforced_download_revisions == {"org/codec": codec_revision}
+    assert fake_hub.hf_hub_download is fake_download
 
 
 def test_warmup_measurement_reports_rtf_and_gaps(monkeypatch):
