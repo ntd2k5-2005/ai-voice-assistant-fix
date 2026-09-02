@@ -6,9 +6,10 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from fastapi.testclient import TestClient
 
 from voice_app.conversation import InMemoryConversationHistory, TurnState
-from voice_app.web import TurnManager
+from voice_app.web import TurnManager, create_app
 
 
 def test_history_is_isolated_and_only_completed_turns_reach_the_prompt():
@@ -134,3 +135,59 @@ def test_control_event_log_can_resume_after_a_cursor():
     second = manager.next_event(session, first["event_sequence"], 0)
     assert second is not None
     assert second["event_sequence"] == first["event_sequence"] + 1
+
+
+def test_public_conversation_and_turn_contract():
+    app = create_app()
+    app.state.turn_manager.pipeline = _Pipeline()
+    with TestClient(app) as client:
+        created = client.post("/api/conversations")
+        assert created.status_code == 200
+        conversation_id = created.json()["conversation_id"]
+
+        started = client.post(
+            "/api/turn/text",
+            json={"conversation_id": conversation_id, "query": "HUIT?"},
+        )
+        assert started.status_code == 200
+        info = started.json()
+        assert info["conversation_id"] == conversation_id
+        assert info["generation"] == 1
+
+        turn = client.get(f"/api/turn/{info['turn_id']}")
+        assert turn.status_code == 200
+        assert turn.json()["state"] == "completed"
+        assert turn.json()["sources"] == [{"document_id": "doc"}]
+
+        conversation = client.get(f"/api/conversations/{conversation_id}")
+        assert conversation.status_code == 200
+        assert conversation.json()["turns"][0]["assistant_text"] == "Trả lời HUIT?"
+
+        reset = client.delete(f"/api/conversations/{conversation_id}")
+        assert reset.status_code == 200
+        assert client.get(f"/api/conversations/{conversation_id}").status_code == 404
+
+
+def test_public_cancel_contract_is_idempotent_and_interrupts():
+    app = create_app()
+    pipeline = _CancelledPipeline()
+    app.state.turn_manager.pipeline = pipeline
+    with TestClient(app) as client:
+        conversation_id = client.post("/api/conversations").json()["conversation_id"]
+        started = client.post(
+            "/api/turn/text",
+            json={"conversation_id": conversation_id, "query": "Lượt đang chạy"},
+        ).json()
+        assert pipeline.started.wait(2)
+        response = client.post(
+            f"/api/turn/{started['turn_id']}/cancel",
+            json={"reason": "barge_in"},
+        )
+        assert response.status_code == 200
+        assert response.json()["state"] == "interrupted"
+        repeated = client.post(
+            f"/api/turn/{started['turn_id']}/cancel",
+            json={"reason": "barge_in"},
+        )
+        assert repeated.status_code == 200
+        assert repeated.json()["state"] == "interrupted"

@@ -1,6 +1,7 @@
 class FloatRingBuffer {
-  constructor(capacity) {
+  constructor(capacity, maxCapacity = capacity) {
     this.capacity = Math.max(1024, capacity | 0);
+    this.maxCapacity = Math.max(this.capacity, maxCapacity | 0);
     this.data = new Float32Array(this.capacity);
     this.readIndex = 0;
     this.writeIndex = 0;
@@ -14,9 +15,10 @@ class FloatRingBuffer {
   }
 
   _grow(required) {
-    if (required <= this.capacity) return;
+    if (required <= this.capacity) return true;
+    if (required > this.maxCapacity) return false;
     let nextCapacity = this.capacity;
-    while (nextCapacity < required) nextCapacity *= 2;
+    while (nextCapacity < required) nextCapacity = Math.min(this.maxCapacity, nextCapacity * 2);
     const next = new Float32Array(nextCapacity);
     const first = Math.min(this.size, this.capacity - this.readIndex);
     next.set(this.data.subarray(this.readIndex, this.readIndex + first), 0);
@@ -25,16 +27,18 @@ class FloatRingBuffer {
     this.capacity = nextCapacity;
     this.readIndex = 0;
     this.writeIndex = this.size;
+    return true;
   }
 
   push(samples) {
-    if (!samples || !samples.length) return;
-    this._grow(this.size + samples.length + 1);
+    if (!samples || !samples.length) return true;
+    if (!this._grow(this.size + samples.length + 1)) return false;
     const first = Math.min(samples.length, this.capacity - this.writeIndex);
     this.data.set(samples.subarray(0, first), this.writeIndex);
     if (first < samples.length) this.data.set(samples.subarray(first), 0);
     this.writeIndex = (this.writeIndex + samples.length) % this.capacity;
     this.size += samples.length;
+    return true;
   }
 
   popInto(out) {
@@ -52,7 +56,7 @@ class FloatRingBuffer {
 class PCMPlayerV10 extends AudioWorkletProcessor {
   constructor() {
     super();
-    this.ring = new FloatRingBuffer(Math.round(sampleRate * 30));
+    this.ring = new FloatRingBuffer(Math.round(sampleRate * 30), Math.round(sampleRate * 120));
     this.prebufferFrames = Math.round(sampleRate * 0.7);
     this.rebufferFrames = Math.round(sampleRate * 0.9);
     this.startedOnce = false;
@@ -68,20 +72,31 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
     this.chunkSpans = [];
     this.cumulativeAcceptedFrames = 0;
     this.cumulativeConsumedFrames = 0;
+    this.epoch = 0;
+    this.overflowCount = 0;
 
     this.port.onmessage = (event) => {
       const msg = event.data || {};
       if (msg.type === "config") {
         this.prebufferFrames = Math.max(1, Math.round(sampleRate * (Number(msg.prebufferMs || 700) / 1000)));
         this.rebufferFrames = Math.max(1, Math.round(sampleRate * (Number(msg.rebufferMs || 900) / 1000)));
+        if (Number.isFinite(Number(msg.epoch))) this.epoch = Number(msg.epoch);
       } else if (msg.type === "pcm") {
+        if (Number(msg.epoch) !== this.epoch) {
+          this.port.postMessage({type: "stale", epoch: Number(msg.epoch), currentEpoch: this.epoch});
+          return;
+        }
         const bytes = new Uint8Array(msg.buffer || new ArrayBuffer(0));
         const aligned = bytes.byteLength - (bytes.byteLength % 2);
         if (!aligned) return;
         const view = new DataView(bytes.buffer, bytes.byteOffset, aligned);
         const samples = new Float32Array(aligned / 2);
         for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
-        this.ring.push(samples);
+        if (!this.ring.push(samples)) {
+          this.overflowCount += 1;
+          this.port.postMessage({type: "overflow", overflowCount: this.overflowCount, bufferedFrames: this.ring.size});
+          return;
+        }
         const sequence = Number(msg.sequence || 0);
         this.chunkSpans.push({sequence, remaining: samples.length, started: false});
         this.cumulativeAcceptedFrames += samples.length;
@@ -94,7 +109,9 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
         });
       } else if (msg.type === "end") {
         this.ended = true;
-      } else if (msg.type === "reset") {
+      } else if (msg.type === "reset" || msg.type === "flush") {
+        if (Number.isFinite(Number(msg.epoch))) this.epoch = Number(msg.epoch);
+        const discardedFrames = this.ring.size;
         this.ring.clear();
         this.startedOnce = false;
         this.playing = false;
@@ -108,6 +125,8 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
         this.chunkSpans = [];
         this.cumulativeAcceptedFrames = 0;
         this.cumulativeConsumedFrames = 0;
+        this.overflowCount = 0;
+        this.port.postMessage({type: "flushed", discardedFrames, epoch: this.epoch});
       }
     };
   }
@@ -127,6 +146,7 @@ class PCMPlayerV10 extends AudioWorkletProcessor {
       ended: this.ended,
       cumulativeAcceptedFrames: this.cumulativeAcceptedFrames,
       cumulativeConsumedFrames: this.cumulativeConsumedFrames,
+      overflowCount: this.overflowCount,
     });
   }
 

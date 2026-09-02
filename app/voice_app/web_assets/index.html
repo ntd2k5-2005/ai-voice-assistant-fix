@@ -3,17 +3,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="color-scheme" content="dark" />
-  <title>Eureka Voice Assistant V10</title>
-  <link rel="stylesheet" href="/assets/style.css?v=10-rebuild-2" />
+  <meta name="theme-color" content="#0b0e14" />
+  <title>Eureka · Trợ lý giọng nói HUIT</title>
+  <link rel="stylesheet" href="/assets/style.css?v=10-final-1" />
 </head>
 <body>
   <main class="shell">
     <header class="hero">
       <div>
-        <div class="eyebrow">EUREKA · REALTIME VOICE V10</div>
+        <div class="eyebrow">EUREKA · VIETNAMESE REALTIME AI</div>
         <h1>HUIT Voice Knowledge Assistant</h1>
-        <p>WebSocket control · adaptive speech units · VieNeu ONNX · AudioWorklet</p>
+        <p>STT → RAG → LLM → TTS · hội thoại nhiều lượt · ngắt lời realtime</p>
       </div>
       <div id="healthBadge" class="badge">Đang kiểm tra…</div>
     </header>
@@ -25,73 +25,76 @@
     </nav>
 
     <section id="tab-chat" class="tab-panel active" role="tabpanel">
-      <div class="grid">
-        <section class="card input-card">
-          <label for="question">Câu hỏi</label>
-          <textarea id="question" rows="4" placeholder="Nhập câu hỏi rồi nhấn Ctrl+Enter…"></textarea>
+      <section class="card conversation-card">
+        <div class="conversation-toolbar">
+          <div>
+            <div class="label">Cuộc hội thoại</div>
+            <small id="conversationLabel">Đang khởi tạo…</small>
+          </div>
+          <div class="toolbar-actions">
+            <label class="mode-control">Chế độ mic
+              <select id="micMode">
+                <option value="ptt">Push-to-talk</option>
+                <option value="vad">VAD · tự nhận giọng</option>
+              </select>
+            </label>
+            <button id="interruptBtn" type="button" class="danger" disabled>Dừng trả lời</button>
+            <button id="resetConversationBtn" type="button">Cuộc trò chuyện mới</button>
+          </div>
+        </div>
+
+        <div id="chatLog" class="chat-log" aria-live="polite">
+          <div class="welcome"><strong>Xin chào!</strong><span>Hãy nhập câu hỏi, nhấn mic để nói, hoặc bật VAD để hội thoại rảnh tay.</span></div>
+        </div>
+
+        <div class="composer">
+          <textarea id="question" rows="3" placeholder="Nhập câu hỏi… (Ctrl+Enter để gửi)"></textarea>
           <div class="actions">
             <button id="sendBtn" type="button" class="primary">Gửi</button>
-            <button id="micBtn" type="button">🎙️ Ghi âm</button>
+            <button id="micBtn" type="button">🎙️ Bắt đầu nói</button>
             <label class="file-btn">Tải audio<input id="audioFile" type="file" accept="audio/*" hidden /></label>
           </div>
+        </div>
 
+        <div id="status" class="status" data-state="idle" aria-live="polite">Sẵn sàng.</div>
+
+        <details class="advanced">
+          <summary>Tùy chọn truy xuất và giọng đọc</summary>
           <div class="controls">
             <label>RAG
               <select id="ragMode">
-                <option value="dense">dense</option>
                 <option value="hybrid">hybrid</option>
+                <option value="dense">dense</option>
                 <option value="sparse">sparse</option>
               </select>
             </label>
             <label>Top-k <input id="topK" type="number" min="1" max="12" value="5" /></label>
             <label>Voice <input id="voiceIndex" type="number" min="0" value="2" /></label>
-            <label class="check"><input id="rerank" type="checkbox" /> Rerank</label>
+            <label class="check"><input id="rerank" type="checkbox" checked /> Rerank</label>
           </div>
-
-          <div id="status" class="status" aria-live="polite">Sẵn sàng.</div>
-          <div class="meter-row">
-            <span>Browser audio ahead</span>
-            <strong id="bufferAhead">0 ms</strong>
-          </div>
-          <div class="meter"><div id="bufferBar"></div></div>
-        </section>
-
-        <section class="card response-card">
-          <div class="block">
-            <div class="label">Transcript</div>
-            <div id="transcript" class="transcript muted">—</div>
-          </div>
-          <div class="block answer-block">
-            <div class="label">Câu trả lời</div>
-            <div id="answer" class="answer muted">Chưa có câu trả lời.</div>
-          </div>
-          <div id="replayWrap" class="replay hidden">
-            <div class="label">Nghe lại toàn bộ câu trả lời</div>
-            <audio id="replay" controls preload="none"></audio>
-          </div>
-        </section>
-      </div>
+        </details>
+      </section>
 
       <section class="card metrics-card">
-        <div class="label">Realtime timeline</div>
+        <div class="row-between"><div class="label">Realtime telemetry</div><strong id="bufferAhead">0 ms</strong></div>
+        <div class="meter"><div id="bufferBar"></div></div>
         <div class="metric-grid">
           <div><span>First speech unit</span><strong id="mSentence">—</strong></div>
           <div><span>TTS start</span><strong id="mTtsStart">—</strong></div>
           <div><span>First PCM server</span><strong id="mFirstPcm">—</strong></div>
           <div><span>First PCM browser</span><strong id="mBrowserPcm">—</strong></div>
           <div><span>LLM done</span><strong id="mLlmDone">—</strong></div>
-          <div><span>Browser underrun</span><strong id="mUnderrun">0</strong></div>
+          <div><span>Underrun / rebuffer</span><strong id="mUnderrun">0 / 0</strong></div>
+          <div><span>Barge-in flush</span><strong id="mBargeIn">—</strong></div>
         </div>
-        <details>
-          <summary>Raw turn metrics</summary>
-          <pre id="rawMetrics">{}</pre>
-        </details>
+        <div id="replayWrap" class="replay hidden"><span class="label">Nghe lại câu trả lời gần nhất</span><audio id="replay" controls preload="none"></audio></div>
+        <details><summary>Raw turn metrics</summary><pre id="rawMetrics">{}</pre></details>
       </section>
     </section>
 
     <section id="tab-knowledge" class="tab-panel" role="tabpanel">
       <div class="grid knowledge-grid">
-        <section class="card">
+        <section class="card stack">
           <div class="label">Nạp tài liệu</div>
           <input id="knowledgeFile" type="file" />
           <input id="knowledgeId" type="text" placeholder="Document ID (tùy chọn)" />
@@ -99,10 +102,7 @@
           <div id="knowledgeStatus" class="status" aria-live="polite">—</div>
         </section>
         <section class="card">
-          <div class="row-between">
-            <div class="label">Tài liệu</div>
-            <button id="knowledgeRefreshBtn" type="button">Làm mới</button>
-          </div>
+          <div class="row-between"><div class="label">Tài liệu</div><button id="knowledgeRefreshBtn" type="button">Làm mới</button></div>
           <div id="knowledgeList" class="doc-list"></div>
         </section>
       </div>
@@ -110,14 +110,11 @@
 
     <section id="tab-system" class="tab-panel" role="tabpanel">
       <section class="card">
-        <div class="row-between">
-          <div class="label">Service health</div>
-          <button id="healthRefreshBtn" type="button">Kiểm tra lại</button>
-        </div>
+        <div class="row-between"><div class="label">Service health và runtime identity</div><button id="healthRefreshBtn" type="button">Kiểm tra lại</button></div>
         <pre id="healthJson">{}</pre>
       </section>
     </section>
   </main>
-  <script src="/assets/app.js?v=10-rebuild-2" defer></script>
+  <script src="/assets/app.js?v=10-final-1" defer></script>
 </body>
 </html>

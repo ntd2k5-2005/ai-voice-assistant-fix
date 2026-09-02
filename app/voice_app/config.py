@@ -143,6 +143,7 @@ class AppSettings(BaseSettings):
     vad_min_silence_ms: int = 650
     vad_activation_frames: int = 3
     vad_barge_in_debounce_ms: int = 180
+    vad_max_utterance_ms: int = 120000
 
     demo_host: str = "0.0.0.0"
     demo_port: int = 7860
@@ -274,6 +275,7 @@ class AppSettings(BaseSettings):
             self.vad_min_speech_ms,
             self.vad_min_silence_ms,
             self.vad_barge_in_debounce_ms,
+            self.vad_max_utterance_ms,
         ) < 0 or self.vad_activation_frames < 1:
             raise ConfigurationError("VAD durations/counts must be non-negative")
         return self

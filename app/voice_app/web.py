@@ -332,6 +332,11 @@ class BrowserMetrics(BaseModel):
     max_browser_receive_gap_ms: float = 0.0
     producer_rate: float | None = None
     producer_throughput_status: str | None = None
+    stale_packets_dropped: int = 0
+    control_reconnect_count: int = 0
+    audio_reconnect_count: int = 0
+    barge_in_detected_ms: float | None = None
+    playback_flush_ms: float | None = None
     pcm_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -438,6 +443,7 @@ def create_app():
                 "min_silence_ms": settings.vad_min_silence_ms,
                 "activation_frames": settings.vad_activation_frames,
                 "barge_in_debounce_ms": settings.vad_barge_in_debounce_ms,
+                "max_utterance_ms": settings.vad_max_utterance_ms,
             },
         }
         return result
@@ -461,6 +467,7 @@ def create_app():
                 "min_silence_ms": settings.vad_min_silence_ms,
                 "activation_frames": settings.vad_activation_frames,
                 "barge_in_debounce_ms": settings.vad_barge_in_debounce_ms,
+                "max_utterance_ms": settings.vad_max_utterance_ms,
             },
         }
 
