@@ -82,6 +82,16 @@ class HealthResponse(BaseModel):
     model: str = Field(..., description="Configured model name")
     ollama_available: bool = Field(..., description="Whether Ollama is reachable")
     model_loaded: bool = Field(..., description="Whether model is loaded")
+    model_digest: Optional[str] = None
+    quantization_level: Optional[str] = None
+    parameter_size: Optional[str] = None
+    configured_placement: Optional[str] = None
+    configured_num_gpu: Optional[int] = None
+    active_processor: Optional[str] = None
+    active_size_bytes: Optional[int] = None
+    active_size_vram_bytes: Optional[int] = None
+    runtime_profile: Optional[str] = None
+    model_manifest_id: Optional[str] = None
     timestamp: str = Field(..., description="Check timestamp")
 
 

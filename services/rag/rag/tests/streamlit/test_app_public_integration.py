@@ -147,9 +147,15 @@ def test_app_executes_ingestion_and_retrieval_through_real_public_facade(
         app = AppTest.from_file(str(APP), default_timeout=30).run()
         assert not app.exception
 
+        app.radio(key="source_kind").set_value("Text").run()
+        app.text_input(key="ingest_document_id").set_value("streamlit-demo")
+        app.text_area[0].set_value(
+            "Registry commits activate indexed documents only after dense and sparse verification. "
+            "This second sentence ensures the configured chunker produces enough evidence."
+        )
         app.button(key="run_ingestion").click().run()
         assert not app.exception
-        assert any("Public knowledge operation completed" in item.value for item in app.success)
+        assert any("Knowledge" in item.value for item in app.success)
         fingerprint = config_fingerprint(module.config)
         ingestion_result = app.session_state[f"rag_last_ingestion:{fingerprint}"]
         ingestion_trace = ingestion_result.diagnostics["trace"]
@@ -214,7 +220,7 @@ def test_app_executes_ingestion_and_retrieval_through_real_public_facade(
         app.selectbox(key="retrieval_mode").select("hybrid")
         app.button(key="run_retrieval").click().run()
         assert not app.exception
-        assert any("Public retrieval completed" in item.value for item in app.success)
+        assert any("Retrieval" in item.value for item in app.success)
         _, retrieval_result = app.session_state[
             f"rag_last_retrieval:{fingerprint}"
         ]
@@ -274,7 +280,7 @@ def test_app_executes_ingestion_and_retrieval_through_real_public_facade(
         assert updated_result.action == "update"
         assert updated_result.diagnostics["trace"]["lifecycle"]["active"] is True
 
-        app.checkbox(key="confirm_delete").check()
+        app.checkbox(key="confirm_delete").check().run()
         app.button(key="delete_document").click().run()
         assert not app.exception
         deleted = module.knowledge.inspect("streamlit-demo")

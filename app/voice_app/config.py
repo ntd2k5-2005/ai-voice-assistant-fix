@@ -31,12 +31,15 @@ class AppSettings(BaseSettings):
         extra="ignore",
     )
 
-    # Upstream service URLs. Ports are integration conventions, not hard
-    # requirements: change them in .env if a module runs elsewhere.
-    stt_base_url: str = "http://127.0.0.1:8000"
-    rag_base_url: str = "http://127.0.0.1:8001"
-    llm_base_url: str = "http://127.0.0.1:8002"
-    tts_base_url: str = "http://127.0.0.1:8003"
+    runtime_profile: str = ""
+    model_manifest_id: str = ""
+
+    # Standalone defaults match the documented native local-balanced profile.
+    # The managed launcher overrides every URL from the selected profile.
+    stt_base_url: str = "http://127.0.0.1:8100"
+    rag_base_url: str = "http://127.0.0.1:8101"
+    llm_base_url: str = "http://127.0.0.1:8102"
+    tts_base_url: str = "http://127.0.0.1:8103"
 
     stt_timeout_s: float = 180.0
     rag_timeout_s: float = 120.0

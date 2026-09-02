@@ -15,7 +15,7 @@ from typing import Any
 
 import numpy as np
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -215,6 +215,16 @@ def create_app():
     @app.get("/health/ready")
     def ready():
         result = orchestrator.health()
+        result["runtime"] = {
+            "profile": settings.runtime_profile or None,
+            "model_manifest_id": settings.model_manifest_id or None,
+            "upstreams": {
+                "stt": settings.stt_base_url,
+                "rag": settings.rag_base_url,
+                "llm": settings.llm_base_url,
+                "tts": settings.tts_base_url,
+            },
+        }
         tts = ((result.get("services") or {}).get("tts") or {}).get("details") or {}
         warmup = tts.get("warmup") or {}
         result["v10"] = {
@@ -305,23 +315,14 @@ def create_app():
     @app.get("/api/turn/{turn_id}/audio")
     def turn_audio(turn_id: str):
         try:
-            session = manager.get(turn_id)
+            manager.get(turn_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail="Unknown turn") from exc
-
-        def source():
-            while True:
-                chunk = session.audio_queue.get()
-                if chunk is None:
-                    return
-                yield chunk.raw
-
-        return StreamingResponse(
-            source(), media_type="application/octet-stream",
-            headers={
-                "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
-                "X-Audio-Sample-Rate": str(settings.tts_sample_rate), "X-Audio-Channels": "1",
-                "X-Audio-Dtype": "int16", "X-Media-Plane": "audioworklet-raw-pcm-v10",
+        return JSONResponse(
+            status_code=410,
+            content={
+                "detail": "Raw HTTP audio was retired to prevent competing consumers",
+                "replacement": f"/ws/turn/{turn_id}/audio",
             },
         )
 
@@ -332,7 +333,7 @@ def create_app():
         Each binary message is one application PCM chunk with its sequence and
         T0-T5 timestamps. WebSocket message boundaries survive intermediaries;
         measured latency can therefore be attributed without guessing how an
-        unframed StreamingResponse body was split or coalesced.
+        unframed HTTP response body was split or coalesced.
         """
         try:
             session = manager.get(turn_id)

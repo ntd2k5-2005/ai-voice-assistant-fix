@@ -25,9 +25,38 @@ except ImportError as exc:
 # ---------------------------------------------------------------------------
 
 MODEL_ID = os.getenv("MODEL_ID", "vinai/PhoWhisper-base")
+MODEL_REVISION = os.getenv("MODEL_REVISION", "").strip() or None
+MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "").strip() or None
+MODEL_LOCAL_FILES_ONLY = os.getenv("MODEL_LOCAL_FILES_ONLY", "false").strip().casefold() in {
+    "1", "true", "yes", "on"
+}
 
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+REQUESTED_DEVICE = os.getenv("MODEL_DEVICE", "auto").strip().casefold() or "auto"
+if REQUESTED_DEVICE not in {"auto", "cpu", "cuda"}:
+    raise RuntimeError("MODEL_DEVICE must be one of: auto, cpu, cuda")
+if REQUESTED_DEVICE == "cuda" and not torch.cuda.is_available():
+    raise RuntimeError("MODEL_DEVICE=cuda was requested but CUDA is unavailable")
+DEVICE = (
+    "cuda" if REQUESTED_DEVICE == "cuda"
+    else "cpu" if REQUESTED_DEVICE == "cpu"
+    else "cuda" if torch.cuda.is_available()
+    else "cpu"
+)
+
+REQUESTED_DTYPE = os.getenv("MODEL_DTYPE", "auto").strip().casefold() or "auto"
+_DTYPES = {
+    "float32": torch.float32,
+    "float16": torch.float16,
+    "bfloat16": torch.bfloat16,
+}
+if REQUESTED_DTYPE == "auto":
+    DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+elif REQUESTED_DTYPE in _DTYPES:
+    DTYPE = _DTYPES[REQUESTED_DTYPE]
+else:
+    raise RuntimeError("MODEL_DTYPE must be one of: auto, float32, float16, bfloat16")
+if DEVICE == "cpu" and DTYPE == torch.float16:
+    raise RuntimeError("MODEL_DTYPE=float16 is not supported by the certified STT CPU profile")
 
 TARGET_SR = 16000
 
@@ -77,12 +106,22 @@ print("Dtype :", DTYPE)
 
 load_start = time.perf_counter()
 
-processor = AutoProcessor.from_pretrained(MODEL_ID)
+model_load_kwargs = {
+    "revision": MODEL_REVISION,
+    "cache_dir": MODEL_CACHE_DIR,
+    "local_files_only": MODEL_LOCAL_FILES_ONLY,
+}
+model_load_kwargs = {
+    key: value for key, value in model_load_kwargs.items() if value is not None
+}
+
+processor = AutoProcessor.from_pretrained(MODEL_ID, **model_load_kwargs)
 
 model = AutoModelForSpeechSeq2Seq.from_pretrained(
     MODEL_ID,
     torch_dtype=DTYPE,
     low_cpu_mem_usage=True,
+    **model_load_kwargs,
 ).to(DEVICE)
 
 model.eval()
@@ -214,6 +253,7 @@ def root() -> dict[str, Any]:
     return {
         "service": "Vietnamese Speech-to-Text API",
         "model": MODEL_ID,
+        "revision": MODEL_REVISION,
         "device": DEVICE,
         "status": "running",
         "streaming": True,
@@ -231,10 +271,23 @@ def health_live() -> dict[str, Any]:
 @app.get("/health/ready")
 @app.get("/health")
 def health() -> dict[str, Any]:
+    resolved_revision = (
+        getattr(getattr(model, "config", None), "_commit_hash", None)
+        or MODEL_REVISION
+    )
     return {
         "status": "ok",
         "model": MODEL_ID,
+        "revision": resolved_revision,
+        "requested_revision": MODEL_REVISION,
         "device": DEVICE,
+        "requested_device": REQUESTED_DEVICE,
+        "dtype": str(DTYPE).removeprefix("torch."),
+        "requested_dtype": REQUESTED_DTYPE,
+        "local_files_only": MODEL_LOCAL_FILES_ONLY,
+        "cache_dir": MODEL_CACHE_DIR or os.getenv("HF_HOME"),
+        "runtime_profile": os.getenv("RUNTIME_PROFILE"),
+        "model_manifest_id": os.getenv("MODEL_MANIFEST_ID"),
         "cuda_available": torch.cuda.is_available(),
         "model_load_time_seconds": round(load_time, 3),
         "vad_load_time_seconds": round(vad_load_time, 3),

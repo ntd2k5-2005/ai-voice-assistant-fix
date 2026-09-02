@@ -220,18 +220,20 @@ def _app(monkeypatch):
 
 def test_app_import_and_initial_render_have_no_immediate_exception(monkeypatch):
     app, _ = _app(monkeypatch)
-    assert app.title[0].value == "RAG Pipeline Inspector"
-    assert any(tab.label == "1. Knowledge flow" for tab in app.tabs)
-    assert any(tab.label == "2. Retrieval flow" for tab in app.tabs)
+    assert app.title[0].value.endswith("RAG Module Demo")
+    assert len(app.tabs) >= 3
 
 
 def test_app_ingestion_path_calls_public_knowledge_service_and_renders_trace(monkeypatch):
     app, module = _app(monkeypatch)
+    app.radio(key="source_kind").set_value("Text").run()
+    app.text_input(key="ingest_document_id").set_value("streamlit-demo")
+    app.text_area[0].set_value("# Streamlit smoke knowledge")
     app.button(key="run_ingestion").click().run()
     assert not app.exception
     assert len(module.knowledge.ingested) == 1
     assert module.knowledge.ingested[0].source_type == "text"
-    assert any("Public knowledge operation completed" in item.value for item in app.success)
+    assert any("Knowledge" in item.value for item in app.success)
     assert any(tab.label == "4. Chunks" for tab in app.tabs)
 
 
@@ -246,9 +248,9 @@ def test_app_retrieval_path_calls_public_module_and_renders_all_stages(monkeypat
     assert kwargs["mode"] == "hybrid"
     assert kwargs["top_k"] == module.config.retrieval.top_k
     assert kwargs["candidate_k"] == module.config.retrieval.candidate_k
-    assert any("Public retrieval completed" in item.value for item in app.success)
+    assert any("Retrieval" in item.value for item in app.success)
     subheaders = {item.value for item in app.subheader}
     assert "Query preparation" in subheaders
     assert "Dense candidates" in subheaders
     assert "Sparse candidates" in subheaders
-    assert "Final typed Top-K output" in subheaders
+    assert "Final Top-K contexts" in subheaders

@@ -597,8 +597,12 @@ def test_retrieval_trace_has_mode_fusion_and_rerank_semantics(observable_module)
     }
     assert fusion["executed"] is True
     assert fusion["reason"] is None
-    assert fusion["strategy"] == "weighted"
-    assert fusion["parameters"] == {"dense_weight": 0.5, "sparse_weight": 0.5}
+    assert fusion["strategy"] == "rrf"
+    assert fusion["parameters"] == {
+        "dense_weight": 0.5,
+        "sparse_weight": 0.5,
+        "rank_constant": 60,
+    }
     assert fusion["candidates"]
     dense_ranks = {
         row["chunk_id"]: row["dense_rank"] for row in trace["dense_candidates"]

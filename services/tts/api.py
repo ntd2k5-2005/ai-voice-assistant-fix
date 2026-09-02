@@ -58,6 +58,10 @@ UPSTREAM_REPOSITORY = os.getenv(
     "VIENEU_UPSTREAM_REPOSITORY",
     "https://github.com/pnnbao97/VieNeu-TTS.git",
 )
+TTS_BACKBONE_MODEL_ID = os.getenv("TTS_BACKBONE_MODEL_ID")
+TTS_BACKBONE_REVISION = os.getenv("TTS_BACKBONE_REVISION")
+TTS_CODEC_MODEL_ID = os.getenv("TTS_CODEC_MODEL_ID")
+TTS_CODEC_REVISION = os.getenv("TTS_CODEC_REVISION")
 
 model = None
 voices: list[Any] = []
@@ -66,12 +70,24 @@ load_time_seconds: float | None = None
 streaming_supported = False
 resolved_backend: str | None = None
 warmup_metrics: dict[str, Any] | None = None
+resolved_model_storage_root: str | None = None
 
 # Optional trace framing used by the V10 application client.  HTTP is allowed
 # to split or coalesce body writes, so native generator yields cannot otherwise
 # be correlated with client reads.  Benchmark/legacy callers keep raw float32.
 _TRACE_MAGIC = b"TTS1"
 _TRACE_HEADER = struct.Struct("<4sIIIQQ")
+
+
+def _cached_huggingface_revision(model_id: str | None) -> str | None:
+    if not model_id:
+        return None
+    cache_root = Path(os.getenv("HF_HOME", "")) / "hub"
+    ref = cache_root / ("models--" + model_id.replace("/", "--")) / "refs" / "main"
+    try:
+        return ref.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
 
 
 def _voice_identifier(value: Any) -> Any:
@@ -280,6 +296,7 @@ def _package_version(name: str) -> str | None:
 async def lifespan(app: FastAPI):
     global model, voices, load_error, load_time_seconds
     global streaming_supported, resolved_backend, warmup_metrics
+    global resolved_model_storage_root
 
     if Vieneu is None:
         load_error = "Missing dependency 'vieneu'"
@@ -290,6 +307,9 @@ async def lifespan(app: FastAPI):
     try:
         model_path = os.getenv("MODEL_PATH", "./models/vieneu-tts-v3-turbo")
         os.environ.setdefault("HF_HOME", model_path)
+        resolved_model_storage_root = str(
+            Path(os.environ["HF_HOME"]).expanduser().resolve(strict=False)
+        )
 
         model = Vieneu(**_model_init_kwargs())
         voices = list(model.list_preset_voices())
@@ -370,6 +390,21 @@ def health_ready():
         "streaming_mode": "frame-pcm" if streaming_supported else "unavailable",
         "backend": resolved_backend,
         "device_policy": "cpu/onnx-pinned",
+        "runtime_profile": os.getenv("RUNTIME_PROFILE"),
+        "model_manifest_id": os.getenv("MODEL_MANIFEST_ID"),
+        "model_storage_root": resolved_model_storage_root,
+        "model_artifacts": {
+            "backbone": {
+                "model_id": TTS_BACKBONE_MODEL_ID,
+                "requested_revision": TTS_BACKBONE_REVISION,
+                "resolved_revision": _cached_huggingface_revision(TTS_BACKBONE_MODEL_ID),
+            },
+            "codec": {
+                "model_id": TTS_CODEC_MODEL_ID,
+                "requested_revision": TTS_CODEC_REVISION,
+                "resolved_revision": _cached_huggingface_revision(TTS_CODEC_MODEL_ID),
+            },
+        },
         "stream_max_chars": STREAM_MAX_CHARS,
         "default_generation_mode": DEFAULT_GENERATION_MODE,
         "recommended_integration_mode": "decoupled-speech-units-websocket-audioworklet-v10",

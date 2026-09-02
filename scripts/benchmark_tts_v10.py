@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "app"))
 
 from voice_app.realtime.speech_units import AdaptiveSpeechUnitChunker  # noqa: E402
+from runtime_config import load_profile  # noqa: E402
 
 
 SAMPLE_RATE = 48_000
@@ -156,7 +157,8 @@ def run_strategy(url: str, text: str, voice: int, strategy: str) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--url", default="http://127.0.0.1:8003")
+    parser.add_argument("--url", default=None)
+    parser.add_argument("--profile", default=None)
     parser.add_argument("--voice", type=int, default=2)
     parser.add_argument("--runs", type=int, default=1)
     parser.add_argument("--text", default=VIDEO_TEXT)
@@ -165,6 +167,9 @@ def main() -> None:
         default=("current", "fewer", "single"),
     )
     args = parser.parse_args()
+    if args.url is None:
+        _, profile = load_profile(ROOT, args.profile)
+        args.url = f"http://127.0.0.1:{profile['ports']['tts']}"
     results = []
     for run in range(1, args.runs + 1):
         for strategy in args.strategies:

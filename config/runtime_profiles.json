@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "default_profile": "local-balanced",
+  "profiles": {
+    "local-low-vram": {
+      "platform": "native-windows",
+      "ports": {"stt": 8100, "rag": 8101, "llm": 8102, "tts": 8103, "web": 7860},
+      "placement": {
+        "stt": {"device": "cuda", "dtype": "float16"},
+        "embedding": {"device": "cpu", "dtype": "float32"},
+        "reranker": {"device": "cpu", "dtype": "float32"},
+        "llm": {"device": "cpu", "num_gpu": 0},
+        "tts": {"device": "cpu", "backend": "onnx"}
+      }
+    },
+    "local-cpu": {
+      "platform": "native-windows",
+      "ports": {"stt": 8100, "rag": 8101, "llm": 8102, "tts": 8103, "web": 7860},
+      "placement": {
+        "stt": {"device": "cpu", "dtype": "float32"},
+        "embedding": {"device": "cpu", "dtype": "float32"},
+        "reranker": {"device": "cpu", "dtype": "float32"},
+        "llm": {"device": "cpu", "num_gpu": 0},
+        "tts": {"device": "cpu", "backend": "onnx"}
+      }
+    },
+    "local-balanced": {
+      "platform": "native-windows",
+      "ports": {"stt": 8100, "rag": 8101, "llm": 8102, "tts": 8103, "web": 7860},
+      "placement": {
+        "stt": {"device": "cpu", "dtype": "float32"},
+        "embedding": {"device": "cpu", "dtype": "float32"},
+        "reranker": {"device": "cpu", "dtype": "float32"},
+        "llm": {"device": "adaptive-offload", "num_gpu": -1},
+        "tts": {"device": "cpu", "backend": "onnx"}
+      }
+    },
+    "colab-t4": {
+      "platform": "linux-colab-t4",
+      "ports": {"stt": 8000, "rag": 8001, "llm": 8002, "tts": 8003, "web": 7860},
+      "placement": {
+        "stt": {"device": "cuda", "dtype": "float16"},
+        "embedding": {"device": "cuda", "dtype": "float16"},
+        "reranker": {"device": "cuda", "dtype": "float16"},
+        "llm": {"device": "adaptive-offload", "num_gpu": -1},
+        "tts": {"device": "cpu", "backend": "onnx"}
+      }
+    },
+    "server-gpu": {
+      "platform": "linux-server-gpu",
+      "ports": {"stt": 8000, "rag": 8001, "llm": 8002, "tts": 8003, "web": 7860},
+      "placement": {
+        "stt": {"device": "cuda", "dtype": "float16"},
+        "embedding": {"device": "cuda", "dtype": "float16"},
+        "reranker": {"device": "cuda", "dtype": "float16"},
+        "llm": {"device": "adaptive-offload", "num_gpu": -1},
+        "tts": {"device": "cpu", "backend": "onnx"}
+      }
+    }
+  }
+}

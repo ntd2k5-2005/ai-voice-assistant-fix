@@ -17,6 +17,8 @@ models/
 services/**/models/
 .rag_runtime/
 .runtime/
+.runtime_data/
+.model_cache/
 services/rag/.rag_runtime/
 .runtime/
 voice_app_audio/

@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "manifest_id": "eureka-v10-source-baseline",
+  "policy": {
+    "source_is_baseline": true,
+    "allow_implicit_model_replacement": false,
+    "unresolved_identity_is_error_in_certification": true
+  },
+  "components": {
+    "stt": {
+      "kind": "speech_to_text",
+      "model_id": "vinai/PhoWhisper-base",
+      "revision": "7ebdb9e88f5cc5271fb88f4d642c82ff9388650e",
+      "tokenizer_id": "vinai/PhoWhisper-base",
+      "tokenizer_revision": "7ebdb9e88f5cc5271fb88f4d642c82ff9388650e",
+      "runtime": "transformers.AutoModelForSpeechSeq2Seq",
+      "quantization": null,
+      "artifact_store": "huggingface"
+    },
+    "vad": {
+      "kind": "voice_activity_detection",
+      "model_id": "silero-vad",
+      "revision": null,
+      "runtime": "silero-vad.pytorch",
+      "package_version": "6.2.1",
+      "quantization": null,
+      "artifact_store": "package-managed"
+    },
+    "embedding": {
+      "kind": "embedding",
+      "model_id": "intfloat/multilingual-e5-small",
+      "revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "tokenizer_id": "intfloat/multilingual-e5-small",
+      "tokenizer_revision": "614241f622f53c4eeff9890bdc4f31cfecc418b3",
+      "runtime": "sentence-transformers",
+      "quantization": null,
+      "artifact_store": "huggingface"
+    },
+    "sparse": {
+      "kind": "sparse_retrieval",
+      "model_id": null,
+      "revision": null,
+      "runtime": "sqlite-fts5",
+      "analyzer": "unicode61",
+      "quantization": null,
+      "artifact_store": "rag-data-dir"
+    },
+    "reranker": {
+      "kind": "reranker",
+      "model_id": "Alibaba-NLP/gte-multilingual-reranker-base",
+      "revision": "8215cf04918ba6f7b6a62bb44238ce2953d8831c",
+      "code_revision": "40ced75c3017eb27626c9d4ea981bde21a2662f4",
+      "tokenizer_id": "Alibaba-NLP/gte-multilingual-reranker-base",
+      "tokenizer_revision": "8215cf04918ba6f7b6a62bb44238ce2953d8831c",
+      "runtime": "transformers.remote-code",
+      "quantization": null,
+      "artifact_store": "huggingface"
+    },
+    "llm": {
+      "kind": "chat_llm",
+      "model_id": "qwen3.5:4b",
+      "revision": null,
+      "runtime": "ollama",
+      "manifest_digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+      "quantization": null,
+      "artifact_store": "ollama-managed"
+    },
+    "tts": {
+      "kind": "text_to_speech",
+      "model_id": "vieneu-v3turbo",
+      "revision": null,
+      "runtime": "vieneu.onnx",
+      "upstream_repository": "https://github.com/pnnbao97/VieNeu-TTS.git",
+      "upstream_commit": "36c4b501b0634a8f59805e6b529a058fbd30190b",
+      "backbone_model_id": "pnnbao-ump/VieNeu-TTS-v3-Turbo",
+      "backbone_revision": "2da0efab622a1722125991736524f080b751ef5b",
+      "codec_model_id": "OpenMOSS-Team/MOSS-Audio-Tokenizer-Nano-ONNX",
+      "codec_revision": "ceff0d0749bfb3fa2d61149794ec6feef0d1e1ae",
+      "quantization": null,
+      "artifact_store": "vieneu-managed"
+    }
+  }
+}

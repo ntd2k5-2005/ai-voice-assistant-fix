@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+import sys
 from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
@@ -264,12 +266,14 @@ def test_known_rag_error_is_mapped_to_http_status():
 
 
 def test_importing_api_does_not_initialize_rag_models_or_stores():
-    import sys
-    import rag.api.app  # noqa: F401
-
-    assert "qdrant_client" not in sys.modules
-    assert "sentence_transformers" not in sys.modules
-    assert "transformers" not in sys.modules
+    code = """
+import sys
+import rag.api.app
+assert 'qdrant_client' not in sys.modules
+assert 'sentence_transformers' not in sys.modules
+assert 'transformers' not in sys.modules
+"""
+    subprocess.run([sys.executable, "-c", code], check=True)
 
 
 def test_text_ingestion_respects_central_parser_size_limit():

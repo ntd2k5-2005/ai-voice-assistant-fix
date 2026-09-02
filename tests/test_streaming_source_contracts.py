@@ -40,8 +40,8 @@ def test_v10_browser_uses_websocket_and_rebuffering_audioworklet():
 def test_v10_web_control_and_media_routes():
     web=(ROOT/"app/voice_app/web.py").read_text(encoding="utf-8")
     assert '@app.websocket("/ws/turn/{turn_id}")' in web
-    assert 'media_type="application/octet-stream"' in web
-    assert '"X-Media-Plane": "audioworklet-raw-pcm-v10"' in web
+    assert 'status_code=410' in web
+    assert 'Raw HTTP audio was retired to prevent competing consumers' in web
     assert 'original_name = _safe_filename(file.filename' in web
     assert 'resolved_id = (document_id or "").strip() or Path(original_name).stem' in web
     assert '@app.websocket("/ws/turn/{turn_id}/audio")' in web

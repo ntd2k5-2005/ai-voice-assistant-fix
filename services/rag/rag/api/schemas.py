@@ -156,6 +156,9 @@ class ReadyResponse(StrictModel):
     status: Literal["ready"] = "ready"
     config_fingerprint: str | None = None
     active_document_count: int | None = None
+    runtime_profile: str | None = None
+    model_manifest_id: str | None = None
+    models: dict[str, Any] | None = None
 
 
 class ErrorResponse(StrictModel):

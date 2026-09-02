@@ -8,7 +8,7 @@ LLM NDJSON reader
    `-- unbounded text spool -> speech segmentation worker -> bounded TTS queue
                                                         -> VieNeu ONNX infer_stream
                                                         -> bounded PCM queue
-                                                        -> raw HTTP PCM
+                                                        -> framed WebSocket PCM
                                                         -> AudioWorklet ring buffer
 ```
 

@@ -117,6 +117,16 @@ async def readiness(service: LLMService = Depends(get_llm_service)):
         model=service.model_name,
         ollama_available=True,
         model_loaded=True,
+        model_digest=health.get("model_digest"),
+        quantization_level=health.get("quantization_level"),
+        parameter_size=health.get("parameter_size"),
+        configured_placement=health.get("configured_placement"),
+        configured_num_gpu=health.get("configured_num_gpu"),
+        active_processor=health.get("active_processor"),
+        active_size_bytes=health.get("active_size_bytes"),
+        active_size_vram_bytes=health.get("active_size_vram_bytes"),
+        runtime_profile=health.get("runtime_profile"),
+        model_manifest_id=health.get("model_manifest_id"),
         timestamp=datetime.now().isoformat(),
     )
 

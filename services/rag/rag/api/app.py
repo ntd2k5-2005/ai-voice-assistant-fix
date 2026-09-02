@@ -19,8 +19,9 @@ ModuleFactory = Callable[[], Any]
 def _default_module_factory():
     # Heavy model/storage imports remain behind service startup, not API import.
     from ..service import RagModule
+    from ..environment import config_from_environment
 
-    return RagModule()
+    return RagModule(config_from_environment())
 
 
 def create_app(

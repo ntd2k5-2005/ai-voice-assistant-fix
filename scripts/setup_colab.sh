@@ -5,7 +5,9 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VENVS="$ROOT/.venvs"
 PYTHON_VERSION="${PYTHON_VERSION:-3.12}"
 OLLAMA_VERSION="${OLLAMA_VERSION:-0.32.15}"
-OLLAMA_MODEL="${OLLAMA_MODEL:-qwen3.5:4b}"
+MODEL_MANIFEST="$ROOT/config/model_manifest.json"
+MANIFEST_OLLAMA_MODEL="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["components"]["llm"]["model_id"])' "$MODEL_MANIFEST")"
+OLLAMA_MODEL="${OLLAMA_MODEL:-$MANIFEST_OLLAMA_MODEL}"
 RUNTIME_JSON="$ROOT/services/tts/runtime.json"
 
 VIENEU_REPO="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["repository"])' "$RUNTIME_JSON")"
@@ -29,7 +31,7 @@ echo "==> STT"
 "$UV" pip install --python "$VENVS/stt/bin/python" -r "$ROOT/services/stt/requirements.txt" -r "$ROOT/services/stt/requirements-test.txt"
 
 echo "==> RAG"
-"$UV" pip install --python "$VENVS/rag/bin/python" -e "$ROOT/services/rag[api]"
+"$UV" pip install --python "$VENVS/rag/bin/python" -e "$ROOT/services/rag[api,test,ui,ocr]"
 
 echo "==> LLM"
 "$UV" pip install --python "$VENVS/llm/bin/python" -e "$ROOT/services/llm[api,test]"
@@ -62,8 +64,25 @@ if ! pgrep -f "ollama serve" >/dev/null 2>&1; then
   sleep 3
 fi
 ollama pull "$OLLAMA_MODEL"
+python3 - "$MODEL_MANIFEST" "$OLLAMA_MODEL" <<'PY'
+import json, sys, urllib.request
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+model_name = sys.argv[2]
+with urllib.request.urlopen("http://127.0.0.1:11434/api/tags", timeout=10) as response:
+    models = json.load(response).get("models", [])
+installed = next(
+    (item for item in models if item.get("model") == model_name or item.get("name") == model_name),
+    None,
+)
+if installed is None:
+    raise SystemExit(f"Ollama model missing after pull: {model_name}")
+expected = manifest["components"]["llm"].get("manifest_digest")
+if expected and installed.get("digest") != expected:
+    raise SystemExit(
+        f"Ollama digest mismatch: expected={expected} actual={installed.get('digest')}"
+    )
+PY
 
 echo
 echo "Setup complete. VieNeu pinned at $VIENEU_COMMIT with uv sync --frozen."
-echo "Start services: $VENVS/app/bin/python $ROOT/scripts/start_services.py"
-echo "Start V10 UI:    cd $ROOT/app && ../.venvs/app/bin/python -m voice_app.web"
+echo "Start full stack: $VENVS/app/bin/python $ROOT/scripts/start_services.py --profile colab-t4 --with-web"

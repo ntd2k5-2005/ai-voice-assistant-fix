@@ -13,6 +13,9 @@ def test_expected_modules_exist():
         ROOT / "app" / "voice_app" / "orchestrator.py",
         ROOT / "app" / "voice_app" / "media_v10.py",
         ROOT / "app" / "voice_app" / "web_assets" / "pcm-player-worklet.js",
+        ROOT / "config" / "model_manifest.json",
+        ROOT / "config" / "runtime_profiles.json",
+        ROOT / "acceptance" / "README.md",
     ]
     assert all(path.exists() for path in expected)
 

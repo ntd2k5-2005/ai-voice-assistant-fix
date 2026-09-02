@@ -48,7 +48,7 @@ def test_source_form_returns_public_document_source_for_text_and_bytes():
     [
         ("Text", "", None, "content", "Document ID"),
         ("Text", "doc", None, "  ", "Text content"),
-        ("File", "doc", None, "", "Select a file"),
+        ("File", "doc", None, "", "file"),
     ],
 )
 def test_source_form_rejects_invalid_ui_intake(
@@ -139,7 +139,13 @@ def test_public_facade_can_be_constructed_for_streamlit_without_private_store_ac
     class PresentationPipeline:
         config = RagConfig()
 
-        def inspect(self, document_id=None, *, include_chunks=False):
+        def inspect(
+            self,
+            document_id=None,
+            *,
+            include_chunks=False,
+            include_chunk_counts=False,
+        ):
             return [] if document_id is None else None
 
         def runtime_snapshot(self):

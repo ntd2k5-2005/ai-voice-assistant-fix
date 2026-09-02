@@ -18,14 +18,16 @@ def vpython(name: str) -> Path:
 def run_pytest(python: Path, cwd: Path, *targets: str) -> None:
     env=os.environ.copy(); env["PYTHONPATH"]=str(cwd)
     print(f"\n==> {cwd.relative_to(ROOT) or '.'}: {' '.join(targets)}")
-    subprocess.run([str(python),"-m","pytest","-q",*targets],cwd=cwd,env=env,check=True)
+    subprocess.run([str(python), "-m", "pytest", *targets], cwd=cwd, env=env, check=True)
 
 
 def main() -> None:
-    run_pytest(vpython("app"), ROOT, "tests/test_repo_layout.py", "tests/test_streaming_source_contracts.py")
+    run_pytest(vpython("app"), ROOT, "tests")
     run_pytest(vpython("app"), ROOT/"app", "tests")
-    run_pytest(vpython("stt"), ROOT/"services/stt", "tests/test_runtime.py")
-    run_pytest(vpython("tts"), ROOT/"services/tts", "tests/test_chunking.py")
-    print("\n✓ module-isolated project test suites PASS")
+    run_pytest(vpython("stt"), ROOT/"services/stt", "tests")
+    run_pytest(vpython("rag"), ROOT/"services/rag", "rag/tests")
+    run_pytest(vpython("llm"), ROOT/"services/llm", "tests")
+    run_pytest(vpython("tts"), ROOT/"services/tts", "tests")
+    print("\nPASS: module-isolated project test suites")
 
 if __name__ == "__main__": main()

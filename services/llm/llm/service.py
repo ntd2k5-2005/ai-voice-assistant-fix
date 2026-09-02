@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
 from typing import Any, Iterator, Optional
 
@@ -39,6 +40,26 @@ def _message_dict(message: Any) -> dict[str, str]:
     return {"role": role or "assistant", "content": content}
 
 
+def _find_model(response: Any, model_name: str) -> Any | None:
+    for model in _field(response, "models", []) or []:
+        name = _field(model, "model") or _field(model, "name")
+        if name == model_name:
+            return model
+    return None
+
+
+def _active_processor(model: Any | None) -> str | None:
+    if model is None:
+        return None
+    size = int(_field(model, "size", 0) or 0)
+    size_vram = int(_field(model, "size_vram", 0) or 0)
+    if size_vram <= 0:
+        return "cpu"
+    if size > 0 and size_vram >= size:
+        return "gpu"
+    return "cpu+gpu"
+
+
 class LLMService:
     """Stateless Ollama service. Conversation history is supplied per request."""
 
@@ -59,11 +80,24 @@ class LLMService:
 
     def health_check(self) -> dict[str, Any]:
         try:
-            self.client.show(self.model_name)
+            info = self.client.show(self.model_name)
+            listed = _find_model(self.client.list(), self.model_name)
+            active = _find_model(self.client.ps(), self.model_name)
+            details = _field(listed, "details") or _field(info, "details", {}) or {}
             return {
                 "ollama_available": True,
                 "model_loaded": True,
                 "model_name": self.model_name,
+                "model_digest": _field(listed, "digest") or _field(info, "digest"),
+                "quantization_level": _field(details, "quantization_level"),
+                "parameter_size": _field(details, "parameter_size"),
+                "configured_placement": self.settings.ollama_placement,
+                "configured_num_gpu": self.settings.ollama_num_gpu,
+                "active_processor": _active_processor(active),
+                "active_size_bytes": _field(active, "size"),
+                "active_size_vram_bytes": _field(active, "size_vram"),
+                "runtime_profile": os.getenv("RUNTIME_PROFILE"),
+                "model_manifest_id": os.getenv("MODEL_MANIFEST_ID"),
                 "error": None,
             }
         except ollama.ResponseError as exc:
@@ -94,7 +128,7 @@ class LLMService:
         top_p: Optional[float],
         max_tokens: Optional[int],
     ) -> dict[str, Any]:
-        return {
+        options = {
             "temperature": (
                 self.settings.default_temperature
                 if temperature is None
@@ -107,6 +141,13 @@ class LLMService:
                 else max_tokens
             ),
         }
+        if self.settings.ollama_num_gpu is not None:
+            options["num_gpu"] = self.settings.ollama_num_gpu
+        if self.settings.ollama_num_ctx is not None:
+            options["num_ctx"] = self.settings.ollama_num_ctx
+        if self.settings.ollama_num_thread is not None:
+            options["num_thread"] = self.settings.ollama_num_thread
+        return options
 
     def chat(
         self,

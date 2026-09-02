@@ -13,6 +13,10 @@ class Settings(BaseSettings):
 
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_timeout: float = 180.0
+    ollama_placement: str = "unconfigured"
+    ollama_num_gpu: int | None = None
+    ollama_num_ctx: int | None = None
+    ollama_num_thread: int | None = None
 
     api_host: str = "0.0.0.0"
     api_port: int = 8002
