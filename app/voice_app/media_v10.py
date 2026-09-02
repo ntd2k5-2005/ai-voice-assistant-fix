@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from .contracts import ChatMessage
+from .grounding import GroundingPolicy
 from .realtime.speech_units import (
     AdaptiveSpeechUnitChunker,
     SpeechUnitProfile,
@@ -36,6 +37,7 @@ class V10MediaPipeline:
     def __init__(self, orchestrator: Any) -> None:
         self.core = orchestrator
         self.settings = orchestrator.settings
+        self.grounding = GroundingPolicy()
 
     def stream_turn(
         self,
@@ -95,11 +97,13 @@ class V10MediaPipeline:
             contexts=rag_result.contexts,
             history=history,
         )
+        grounding = self.grounding.decide(transcript, rag_result.contexts)
         sources = [source.model_dump(mode="json") for source in self.core._sources(rag_result)]
         yield {
             "type": "prepared",
             "transcript": transcript,
             "sources": sources,
+            "grounding": grounding.as_dict(),
             "timings": {
                 "stt_ms": stt_result.client_latency_ms if stt_result else 0.0,
                 "rag_ms": rag_result.client_latency_ms,
@@ -189,6 +193,28 @@ class V10MediaPipeline:
             first_ttft = None
             try:
                 put_control({"type": "stage", "stage": "llm", "message": "LLM đang trả lời…", "at_ms": rel_ms()})
+                if grounding.forced_answer:
+                    answer_parts.append(grounding.forced_answer)
+                    put_control({
+                        "type": "llm_delta",
+                        "delta": grounding.forced_answer,
+                        "answer": grounding.forced_answer,
+                        "meta": {"grounding_short_circuit": True, "client_ttft_ms": 0.0},
+                    })
+                    speech_spool.put(grounding.forced_answer)
+                    shared["llm_done_ms"] = rel_ms()
+                    shared["llm_meta"] = {
+                        "type": "done",
+                        "client_ttft_ms": 0.0,
+                        "client_total_ms": shared["llm_done_ms"],
+                        "grounding_short_circuit": True,
+                    }
+                    put_control({
+                        "type": "llm_done",
+                        "answer": grounding.forced_answer,
+                        "meta": shared["llm_meta"],
+                    })
+                    return
                 for event in self.core.llm.chat_stream(
                     messages,
                     temperature=self.settings.llm_temperature,
@@ -555,6 +581,7 @@ class V10MediaPipeline:
             "transcript": transcript,
             "answer": "".join(answer_parts).strip(),
             "sources": sources,
+            "grounding": grounding.as_dict(),
             "timings": timings,
             "details": {"tts": tts_meta},
         }

@@ -579,7 +579,7 @@ async function startTurn(fetcher, userText = "") {
 
 function commonForm(form, id) {
   form.append("conversation_id", id);
-  form.append("rag_mode", $("ragMode")?.value || "hybrid");
+  form.append("rag_mode", $("ragMode")?.value || "dense");
   form.append("rerank", $("rerank")?.checked ? "true" : "false");
   form.append("top_k", $("topK")?.value || "5");
   form.append("voice_index", $("voiceIndex")?.value || "2");
@@ -594,7 +594,7 @@ async function sendText() {
     await startTurn((id) => fetch("/api/turn/text", {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        conversation_id: id, query, rag_mode: $("ragMode")?.value || "hybrid",
+        conversation_id: id, query, rag_mode: $("ragMode")?.value || "dense",
         rerank: Boolean($("rerank")?.checked), top_k: Number($("topK")?.value || 5),
         voice_index: Number($("voiceIndex")?.value || 2),
       }),

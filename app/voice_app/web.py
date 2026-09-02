@@ -246,6 +246,7 @@ class TurnManager:
                             TurnState.THINKING,
                             user_text=str(event.get("transcript") or ""),
                             sources=list(event.get("sources") or []),
+                            grounding=dict(event.get("grounding") or {}),
                         )
                     elif kind == "pcm":
                         self.history.transition(session.conversation_id, session.turn_id, TurnState.SPEAKING)
@@ -257,6 +258,7 @@ class TurnManager:
                             user_text=str(event.get("transcript") or ""),
                             assistant_text=str(event.get("answer") or ""),
                             sources=list(event.get("sources") or []),
+                            grounding=dict(event.get("grounding") or {}),
                         )
                     if event.get("type") == "pcm":
                         pcm16 = self._pcm_float32_to_int16(event["raw"])

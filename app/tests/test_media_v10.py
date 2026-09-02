@@ -16,9 +16,24 @@ class FakeRAG:
     def health(self): return ServiceStatus(service="RAG",reachable=True,ready=True)
     def retrieve(self,query,**kwargs): return RAGResult(query=query,mode=kwargs["mode"],rerank_requested=False,rerank_applied=False,contexts=[RAGContext(rank=1,chunk_id="c1",document_id="d1",text="EUREKA V10",score=.9,score_source="dense")],latency=RAGLatency(total_ms=1),client_latency_ms=2)
     def close(self): pass
+
+
+class EmptyRAG(FakeRAG):
+    def retrieve(self, query, **kwargs):
+        return RAGResult(
+            query=query,
+            mode=kwargs["mode"],
+            rerank_requested=False,
+            rerank_applied=False,
+            contexts=[],
+            latency=RAGLatency(total_ms=1),
+            client_latency_ms=2,
+        )
 class FastLLM:
+    def __init__(self): self.calls = 0
     def health(self): return ServiceStatus(service="LLM",reachable=True,ready=True)
     def chat_stream(self,messages,**kwargs):
+        self.calls += 1
         for part in [
             "Đây là phần đầu đủ dài để tạo một speech unit sớm, và LLM vẫn tiếp tục sinh nội dung. ",
             "Phần thứ hai tiếp tục được stream ngay cả khi TTS phía sau đang xử lý rất chậm. ",
@@ -130,6 +145,23 @@ def test_pipeline_explicitly_flags_below_realtime_tts(tmp_path):
     meta = next(event["meta"] for event in events if event["type"] == "tts_done")
     assert meta["aggregate_rtf"] > 1.0
     assert meta["producer_throughput_status"] == "insufficient"
+
+
+def test_factual_no_context_short_circuits_llm_but_still_speaks(tmp_path):
+    orchestrator = build(tmp_path)
+    llm = FastLLM()
+    orchestrator.rag = EmptyRAG()
+    orchestrator.llm = llm
+    events = list(
+        V10MediaPipeline(orchestrator).stream_turn(
+            query_text="Thông tin không có trong kho?", rag_mode="dense", rerank=False, top_k=1
+        )
+    )
+    done = next(event for event in events if event["type"] == "done")
+    assert done["answer"] == "Tôi chưa tìm thấy thông tin này trong kho tri thức hiện tại."
+    assert done["grounding"]["policy"] == "deterministic-no-answer"
+    assert llm.calls == 0
+    assert any(event["type"] == "pcm" for event in events)
 
 from voice_app.web import _safe_filename
 

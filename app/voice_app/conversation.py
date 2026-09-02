@@ -74,6 +74,7 @@ class TurnRecord:
     user_text: str = ""
     assistant_text: str = ""
     sources: list[dict] = field(default_factory=list)
+    grounding: dict = field(default_factory=dict)
     error: str | None = None
     created_at: float = field(default_factory=time.time)
     updated_at: float = field(default_factory=time.time)
@@ -86,6 +87,7 @@ class TurnRecord:
             "user_text": self.user_text,
             "assistant_text": self.assistant_text,
             "sources": list(self.sources),
+            "grounding": dict(self.grounding),
             "error": self.error,
             "created_at": self.created_at,
             "updated_at": self.updated_at,
@@ -178,7 +180,7 @@ class InMemoryConversationHistory:
                         return turn
                     raise RuntimeError(f"invalid turn transition {turn.state.value} -> {state.value}")
                 turn.state = state
-            for key in ("user_text", "assistant_text", "sources", "error"):
+            for key in ("user_text", "assistant_text", "sources", "grounding", "error"):
                 if key in updates:
                     setattr(turn, key, updates[key])
             now = time.time()
