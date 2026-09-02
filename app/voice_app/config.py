@@ -130,6 +130,20 @@ class AppSettings(BaseSettings):
     source_excerpt_chars: int = 500
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
+    conversation_max_count: int = 64
+    conversation_ttl_s: float = 21600.0
+    voice_upload_max_bytes: int = 20 * 1024 * 1024
+    knowledge_upload_max_bytes: int = 50 * 1024 * 1024
+
+    # Browser VAD defaults are explicit and returned by the gateway. The VAD
+    # runs on live PCM frames; MediaRecorder is only a compatibility PTT path.
+    vad_threshold_db: float = -42.0
+    vad_pre_roll_ms: int = 300
+    vad_min_speech_ms: int = 250
+    vad_min_silence_ms: int = 650
+    vad_activation_frames: int = 3
+    vad_barge_in_debounce_ms: int = 180
+
     demo_host: str = "0.0.0.0"
     demo_port: int = 7860
     demo_share: bool = False
@@ -249,4 +263,17 @@ class AppSettings(BaseSettings):
             raise ConfigurationError(
                 "V10 steady-unit chars must satisfy 1 <= min <= target <= max"
             )
+        if self.conversation_max_count < 1 or self.conversation_ttl_s < 60:
+            raise ConfigurationError("conversation bounds must be positive")
+        if min(self.voice_upload_max_bytes, self.knowledge_upload_max_bytes) < 1024:
+            raise ConfigurationError("upload limits must be at least 1024 bytes")
+        if not -80 <= self.vad_threshold_db <= -10:
+            raise ConfigurationError("vad_threshold_db must be in [-80, -10]")
+        if min(
+            self.vad_pre_roll_ms,
+            self.vad_min_speech_ms,
+            self.vad_min_silence_ms,
+            self.vad_barge_in_debounce_ms,
+        ) < 0 or self.vad_activation_frames < 1:
+            raise ConfigurationError("VAD durations/counts must be non-negative")
         return self

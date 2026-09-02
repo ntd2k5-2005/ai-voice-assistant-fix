@@ -9,6 +9,8 @@ import tempfile
 import threading
 import time
 import uuid
+from collections import deque
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -20,6 +22,10 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .config import AppSettings
+from .conversation import (
+    InMemoryConversationHistory,
+    TurnState,
+)
 from .media_v10 import V10MediaPipeline
 from .orchestrator import VoiceOrchestrator
 
@@ -61,24 +67,43 @@ def encode_pcm_websocket_packet(packet: AudioPacket, *, sent_ns: int | None = No
 @dataclass
 class TurnSession:
     turn_id: str
+    conversation_id: str
+    generation: int
     created_at: float
-    event_queue: queue.Queue[dict[str, Any]] = field(default_factory=queue.Queue)
+    event_queue: queue.Queue[dict[str, Any]] = field(default_factory=lambda: queue.Queue(maxsize=2048))
     audio_queue: queue.Queue[AudioPacket | None] = field(default_factory=queue.Queue)
     finished: threading.Event = field(default_factory=threading.Event)
     final_audio: str | None = None
     browser_metrics: dict[str, Any] = field(default_factory=dict)
     temp_audio_dir: Path | None = None
+    cancel_event: threading.Event = field(default_factory=threading.Event)
+    cancel_reason: str | None = None
+    worker: threading.Thread | None = None
+    event_log: deque[dict[str, Any]] = field(default_factory=lambda: deque(maxlen=2048))
+    event_condition: threading.Condition = field(default_factory=threading.Condition)
+    event_sequence: int = 0
 
 
 class TurnManager:
-    def __init__(self, orchestrator: VoiceOrchestrator) -> None:
+    def __init__(self, orchestrator: VoiceOrchestrator, history=None) -> None:
         self.orchestrator = orchestrator
         self.pipeline = V10MediaPipeline(orchestrator)
+        self.history = history or InMemoryConversationHistory()
         self._turns: dict[str, TurnSession] = {}
         self._lock = threading.Lock()
 
-    def _new(self) -> TurnSession:
-        session = TurnSession(turn_id=uuid.uuid4().hex, created_at=time.time())
+    def _new(self, conversation_id: str | None = None) -> tuple[TurnSession, list]:
+        conversation = self.history.get(conversation_id) if conversation_id else self.history.create()
+        history = list(self.history.messages(conversation.conversation_id, self.orchestrator.settings.max_history_turns))
+        turn_id = uuid.uuid4().hex
+        record = self.history.begin_turn(conversation.conversation_id, turn_id)
+        session = TurnSession(
+            turn_id=turn_id,
+            conversation_id=conversation.conversation_id,
+            generation=record.generation,
+            created_at=time.time(),
+            audio_queue=queue.Queue(maxsize=max(16, self.orchestrator.settings.tts_audio_queue_max * 4)),
+        )
         with self._lock:
             # Keep the demo server bounded across long interactive sessions. Only
             # completed turns are evicted; active turn streams are never touched.
@@ -90,7 +115,7 @@ class TurnManager:
                 for old in finished[: max(0, len(self._turns) - 31)]:
                     self._turns.pop(old.turn_id, None)
             self._turns[session.turn_id] = session
-        return session
+        return session, history
 
     def get(self, turn_id: str) -> TurnSession:
         with self._lock:
@@ -108,8 +133,80 @@ class TurnManager:
             raise ValueError("PCM contains NaN/Inf")
         return (np.clip(samples, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
 
-    def start(self, *, query_text=None, audio_path=None, audio_temp_dir=None, rag_mode=None, rerank=None, top_k=None, voice_index=None):
-        session = self._new()
+    def _emit(self, session: TurnSession, event: dict[str, Any]) -> None:
+        if session.cancel_event.is_set() and event.get("type") not in {
+            "cancelled", "interrupted", "stream_closed", "error"
+        }:
+            return
+        event.setdefault("turn_id", session.turn_id)
+        event.setdefault("conversation_id", session.conversation_id)
+        event.setdefault("generation", session.generation)
+        with session.event_condition:
+            session.event_sequence += 1
+            event.setdefault("event_sequence", session.event_sequence)
+            session.event_log.append(event)
+            session.event_condition.notify_all()
+        try:
+            session.event_queue.put_nowait(event)
+        except queue.Full:
+            try:
+                session.event_queue.get_nowait()
+            except queue.Empty:
+                pass
+            session.event_queue.put_nowait(event)
+
+    @staticmethod
+    def next_event(session: TurnSession, after: int, timeout: float = 15.0) -> dict[str, Any] | None:
+        deadline = time.monotonic() + timeout
+        with session.event_condition:
+            while True:
+                match = next(
+                    (item for item in session.event_log if int(item.get("event_sequence") or 0) > after),
+                    None,
+                )
+                if match is not None:
+                    return match
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                session.event_condition.wait(remaining)
+
+    @staticmethod
+    def _drain(target: queue.Queue) -> None:
+        while True:
+            try:
+                target.get_nowait()
+            except queue.Empty:
+                return
+
+    def cancel(self, turn_id: str, *, reason: str = "user_cancelled") -> TurnSession:
+        session = self.get(turn_id)
+        if session.finished.is_set() or session.cancel_event.is_set():
+            return session
+        session.cancel_reason = reason
+        session.cancel_event.set()
+        state = TurnState.INTERRUPTED if reason == "barge_in" else TurnState.CANCELLED
+        self.history.transition(session.conversation_id, session.turn_id, state)
+        self._drain(session.audio_queue)
+        session.audio_queue.put_nowait(None)
+        self._drain(session.event_queue)
+        with session.event_condition:
+            session.event_log.clear()
+        self._emit(session, {"type": state.value, "reason": reason, "state": state.value})
+        return session
+
+    def delete_conversation(self, conversation_id: str) -> bool:
+        with self._lock:
+            active = [
+                session for session in self._turns.values()
+                if session.conversation_id == conversation_id and not session.finished.is_set()
+            ]
+        for session in active:
+            self.cancel(session.turn_id, reason="conversation_reset")
+        return self.history.delete(conversation_id)
+
+    def start(self, *, conversation_id=None, query_text=None, audio_path=None, audio_temp_dir=None, rag_mode=None, rerank=None, top_k=None, voice_index=None):
+        session, history = self._new(conversation_id)
         session.temp_audio_dir = audio_temp_dir
 
         def worker() -> None:
@@ -121,7 +218,46 @@ class TurnManager:
                     rerank=rerank,
                     top_k=top_k,
                     voice_index=voice_index,
+                    history=history,
+                    cancel_event=session.cancel_event,
                 ):
+                    if session.cancel_event.is_set() and event.get("type") not in {"cancelled", "error"}:
+                        continue
+                    kind = event.get("type")
+                    if kind == "stage":
+                        state = {
+                            "stt": TurnState.TRANSCRIBING,
+                            "rag": TurnState.RETRIEVING,
+                            "llm": TurnState.THINKING,
+                        }.get(event.get("stage"))
+                        if state:
+                            self.history.transition(session.conversation_id, session.turn_id, state)
+                    elif kind == "transcript_ready":
+                        self.history.transition(
+                            session.conversation_id,
+                            session.turn_id,
+                            TurnState.RETRIEVING,
+                            user_text=str(event.get("transcript") or ""),
+                        )
+                    elif kind == "prepared":
+                        self.history.transition(
+                            session.conversation_id,
+                            session.turn_id,
+                            TurnState.THINKING,
+                            user_text=str(event.get("transcript") or ""),
+                            sources=list(event.get("sources") or []),
+                        )
+                    elif kind == "pcm":
+                        self.history.transition(session.conversation_id, session.turn_id, TurnState.SPEAKING)
+                    elif kind == "done":
+                        self.history.transition(
+                            session.conversation_id,
+                            session.turn_id,
+                            TurnState.COMPLETED,
+                            user_text=str(event.get("transcript") or ""),
+                            assistant_text=str(event.get("answer") or ""),
+                            sources=list(event.get("sources") or []),
+                        )
                     if event.get("type") == "pcm":
                         pcm16 = self._pcm_float32_to_int16(event["raw"])
                         packet_meta = {k: v for k, v in event.items() if k != "raw"}
@@ -133,27 +269,46 @@ class TurnManager:
                         # Turn length is bounded by LLM_MAX_TOKENS, so this per-turn
                         # queue is finite in practice; the TTS/media worker remains
                         # single-threaded and bounded upstream.
-                        session.audio_queue.put_nowait(AudioPacket(pcm16, packet_meta))
-                        session.event_queue.put(packet_meta)
+                        packet = AudioPacket(pcm16, packet_meta)
+                        while not session.cancel_event.is_set():
+                            try:
+                                session.audio_queue.put(packet, timeout=0.05)
+                                break
+                            except queue.Full:
+                                continue
+                        self._emit(session, packet_meta)
                     else:
                         if event.get("type") == "tts_done":
                             session.final_audio = event.get("final_audio")
-                        session.event_queue.put(event)
+                        self._emit(session, event)
             except Exception as exc:
-                session.event_queue.put({"type": "error", "stage": "web-media", "error": str(exc)})
+                if not session.cancel_event.is_set():
+                    self.history.transition(
+                        session.conversation_id,
+                        session.turn_id,
+                        TurnState.FAILED,
+                        error=str(exc),
+                    )
+                    self._emit(session, {"type": "error", "stage": "web-media", "error": str(exc)})
             finally:
-                session.audio_queue.put(None)
-                session.event_queue.put({"type": "stream_closed"})
+                try:
+                    session.audio_queue.put_nowait(None)
+                except queue.Full:
+                    self._drain(session.audio_queue)
+                    session.audio_queue.put_nowait(None)
+                self._emit(session, {"type": "stream_closed"})
                 session.finished.set()
                 if session.temp_audio_dir is not None:
                     shutil.rmtree(session.temp_audio_dir, ignore_errors=True)
 
-        threading.Thread(target=worker, name=f"v10-turn-{session.turn_id[:8]}", daemon=True).start()
+        session.worker = threading.Thread(target=worker, name=f"v10-turn-{session.turn_id[:8]}", daemon=True)
+        session.worker.start()
         return session
 
 
 class TextTurnRequest(BaseModel):
     query: str = Field(min_length=1)
+    conversation_id: str | None = None
     rag_mode: str | None = None
     rerank: bool | None = None
     top_k: int | None = Field(default=None, ge=1, le=20)
@@ -180,18 +335,52 @@ class BrowserMetrics(BaseModel):
     pcm_trace: list[dict[str, Any]] = Field(default_factory=list)
 
 
+class CancelTurnRequest(BaseModel):
+    reason: str = Field(default="user_cancelled", min_length=1, max_length=64)
+
+
 def _safe_filename(name: str | None, fallback: str) -> str:
     value = Path(name or fallback).name.strip()
     return value or fallback
 
 
+async def _read_upload_limited(upload: UploadFile, limit: int) -> bytes:
+    parts: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await upload.read(min(1024 * 1024, limit + 1 - total))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise HTTPException(status_code=413, detail=f"Upload exceeds {limit} bytes")
+        parts.append(chunk)
+    return b"".join(parts)
+
+
 def create_app():
     settings = AppSettings()
     orchestrator = VoiceOrchestrator(settings)
-    manager = TurnManager(orchestrator)
+    manager = TurnManager(
+        orchestrator,
+        history=InMemoryConversationHistory(
+            max_conversations=settings.conversation_max_count,
+            ttl_s=settings.conversation_ttl_s,
+        ),
+    )
     web_dir = Path(__file__).resolve().parent / "web_assets"
 
-    app = FastAPI(title="Eureka Voice Assistant V10", version="0.10.0")
+    @asynccontextmanager
+    async def lifespan(_app):
+        yield
+        with manager._lock:
+            active = [session for session in manager._turns.values() if not session.finished.is_set()]
+        for session in active:
+            manager.cancel(session.turn_id, reason="server_shutdown")
+        orchestrator.close()
+
+    app = FastAPI(title="Eureka Voice Assistant V10", version="0.10.0", lifespan=lifespan)
+    app.state.turn_manager = manager
     app.mount("/assets", StaticFiles(directory=web_dir), name="assets")
 
     @app.get("/")
@@ -241,12 +430,23 @@ def create_app():
                 and "onnx" in str(tts.get("backend") or "").lower()
             ),
             "tts_performance_probe": warmup.get("performance"),
+            "conversation_store": "in-memory",
+            "vad": {
+                "threshold_db": settings.vad_threshold_db,
+                "pre_roll_ms": settings.vad_pre_roll_ms,
+                "min_speech_ms": settings.vad_min_speech_ms,
+                "min_silence_ms": settings.vad_min_silence_ms,
+                "activation_frames": settings.vad_activation_frames,
+                "barge_in_debounce_ms": settings.vad_barge_in_debounce_ms,
+            },
         }
         return result
 
     def _turn_info(session: TurnSession):
         return {
             "turn_id": session.turn_id,
+            "conversation_id": session.conversation_id,
+            "generation": session.generation,
             "sample_rate": settings.tts_sample_rate,
             "pcm_dtype": "int16",
             "channels": 1,
@@ -254,14 +454,28 @@ def create_app():
             "rebuffer_ms": settings.browser_audio_rebuffer_ms,
             "control_transport": "websocket",
             "media_transport": "binary-websocket-pcm-v1",
+            "vad": {
+                "threshold_db": settings.vad_threshold_db,
+                "pre_roll_ms": settings.vad_pre_roll_ms,
+                "min_speech_ms": settings.vad_min_speech_ms,
+                "min_silence_ms": settings.vad_min_silence_ms,
+                "activation_frames": settings.vad_activation_frames,
+                "barge_in_debounce_ms": settings.vad_barge_in_debounce_ms,
+            },
         }
 
     @app.post("/api/turn/text")
     def start_text(request: TextTurnRequest):
-        session = manager.start(
-            query_text=request.query.strip(), rag_mode=request.rag_mode, rerank=request.rerank,
-            top_k=request.top_k, voice_index=request.voice_index,
-        )
+        try:
+            session = manager.start(
+                conversation_id=request.conversation_id,
+                query_text=request.query.strip(), rag_mode=request.rag_mode, rerank=request.rerank,
+                top_k=request.top_k, voice_index=request.voice_index,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown conversation") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _turn_info(session)
 
     @app.post("/api/turn/voice")
@@ -269,19 +483,65 @@ def create_app():
         audio: UploadFile = File(...), rag_mode: str | None = Form(default=None),
         rerank: bool | None = Form(default=None), top_k: int | None = Form(default=None),
         voice_index: int | None = Form(default=None),
+        conversation_id: str | None = Form(default=None),
     ):
-        data = await audio.read()
+        data = await _read_upload_limited(audio, settings.voice_upload_max_bytes)
         if not data:
             raise HTTPException(status_code=400, detail="Empty audio upload")
         temp_dir = Path(tempfile.mkdtemp(prefix="eureka-v10-voice-"))
         filename = _safe_filename(audio.filename, "recording.webm")
         temp_path = temp_dir / filename
         temp_path.write_bytes(data)
-        session = manager.start(
-            audio_path=temp_path, audio_temp_dir=temp_dir, rag_mode=rag_mode, rerank=rerank,
-            top_k=top_k, voice_index=voice_index,
-        )
+        try:
+            session = manager.start(
+                conversation_id=conversation_id,
+                audio_path=temp_path, audio_temp_dir=temp_dir, rag_mode=rag_mode, rerank=rerank,
+                top_k=top_k, voice_index=voice_index,
+            )
+        except KeyError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=404, detail="Unknown conversation") from exc
+        except RuntimeError as exc:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         return _turn_info(session)
+
+    @app.post("/api/conversations")
+    def create_conversation():
+        return manager.history.create().as_dict()
+
+    @app.get("/api/conversations/{conversation_id}")
+    def read_conversation(conversation_id: str):
+        try:
+            return manager.history.get(conversation_id).as_dict()
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail="Unknown conversation") from exc
+
+    @app.delete("/api/conversations/{conversation_id}")
+    def reset_conversation(conversation_id: str):
+        if not manager.delete_conversation(conversation_id):
+            raise HTTPException(status_code=404, detail="Unknown conversation")
+        return {"ok": True, "conversation_id": conversation_id}
+
+    @app.get("/api/turn/{turn_id}")
+    def read_turn(turn_id: str):
+        try:
+            session = manager.get(turn_id)
+            conversation = manager.history.get(session.conversation_id)
+            turn = next(item for item in conversation.turns if item.turn_id == turn_id)
+        except (KeyError, StopIteration) as exc:
+            raise HTTPException(status_code=404, detail="Unknown turn") from exc
+        return turn.as_dict()
+
+    @app.post("/api/turn/{turn_id}/cancel")
+    def cancel_turn(turn_id: str, request: CancelTurnRequest):
+        try:
+            session = manager.cancel(turn_id, reason=request.reason)
+            conversation = manager.history.get(session.conversation_id)
+            turn = next(item for item in conversation.turns if item.turn_id == turn_id)
+        except (KeyError, StopIteration) as exc:
+            raise HTTPException(status_code=404, detail="Unknown turn") from exc
+        return turn.as_dict()
 
     @app.websocket("/ws/turn/{turn_id}")
     async def turn_control(websocket: WebSocket, turn_id: str):
@@ -291,17 +551,18 @@ def create_app():
             await websocket.close(code=4404, reason="Unknown turn")
             return
         await websocket.accept()
+        cursor = int(websocket.query_params.get("after", "0") or 0)
         try:
             while True:
-                try:
-                    event = await asyncio.to_thread(session.event_queue.get, True, 15.0)
-                except queue.Empty:
+                event = await asyncio.to_thread(manager.next_event, session, cursor, 15.0)
+                if event is None:
                     await websocket.send_json({"type": "keepalive", "at": time.time()})
-                    if session.finished.is_set() and session.event_queue.empty():
+                    if session.finished.is_set() and cursor >= session.event_sequence:
                         await websocket.send_json({"type": "stream_closed"})
                         break
                     continue
                 await websocket.send_json(event)
+                cursor = int(event.get("event_sequence") or cursor)
                 if event.get("type") == "stream_closed":
                     break
         except WebSocketDisconnect:
@@ -395,7 +656,7 @@ def create_app():
 
     @app.post("/api/knowledge/upload")
     async def upload_knowledge(file: UploadFile = File(...), document_id: str | None = Form(default=None)):
-        data = await file.read()
+        data = await _read_upload_limited(file, settings.knowledge_upload_max_bytes)
         if not data:
             raise HTTPException(status_code=400, detail="Empty file")
         original_name = _safe_filename(file.filename, "document.bin")

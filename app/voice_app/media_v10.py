@@ -47,12 +47,18 @@ class V10MediaPipeline:
         rerank: bool | None = None,
         top_k: int | None = None,
         voice_index: int | None = None,
+        cancel_event: threading.Event | None = None,
     ) -> Iterator[dict[str, Any]]:
         started = time.perf_counter()
         trace_id = uuid.uuid4().hex
 
         def rel_ms() -> float:
             return (time.perf_counter() - started) * 1000.0
+
+        cancel = cancel_event or threading.Event()
+
+        def cancelled() -> bool:
+            return cancel.is_set()
 
         stt_result = None
         transcript = (query_text or "").strip()
@@ -61,6 +67,9 @@ class V10MediaPipeline:
                 raise ValueError("Provide audio_path or query_text")
             yield {"type": "stage", "stage": "stt", "message": "Đang nhận dạng giọng nói…", "at_ms": rel_ms()}
             stt_result = self.core.stt.transcribe(audio_path)
+            if cancelled():
+                yield {"type": "cancelled", "stage": "stt", "at_ms": rel_ms()}
+                return
             transcript = stt_result.text.strip()
         if not transcript:
             raise ValueError("STT returned an empty transcript")
@@ -78,6 +87,9 @@ class V10MediaPipeline:
             candidate_k=max(self.settings.rag_candidate_k, top_k_value),
             debug=False,
         )
+        if cancelled():
+            yield {"type": "cancelled", "stage": "rag", "at_ms": rel_ms()}
+            return
         messages = self.core.prompt_builder.build(
             question=transcript,
             contexts=rag_result.contexts,
@@ -100,7 +112,6 @@ class V10MediaPipeline:
         # and decoupling this path is the fix for V9's 8.4s LLM/TTS backpressure.
         speech_spool: queue.Queue[str | object] = queue.Queue()
         media_q: queue.Queue[dict[str, Any] | None] = queue.Queue(maxsize=self.settings.tts_audio_queue_max)
-        cancel = threading.Event()
         llm_done = threading.Event()
         segmenter_done = threading.Event()
         tts_done = threading.Event()
@@ -135,21 +146,33 @@ class V10MediaPipeline:
         }
 
         def put_control(event: dict[str, Any]) -> None:
+            if cancelled() and event.get("type") not in {"error", "cancelled"}:
+                return
             control_q.put(event)
             shared["max_control_queue_depth"] = max(shared["max_control_queue_depth"], control_q.qsize())
 
         def put_media(event: dict[str, Any] | None) -> None:
+            if cancelled() and event is not None:
+                return
             if isinstance(event, dict) and event.get("type") == "pcm":
                 event["trace_id"] = trace_id
                 event["t3_media_enqueue_ns"] = time.time_ns()
                 event["t3_media_enqueue_ms"] = rel_ms()
                 event["media_queue_depth_at_enqueue"] = media_q.qsize()
             before = time.perf_counter()
-            media_q.put(event)
+            while True:
+                try:
+                    media_q.put(event, timeout=0.05)
+                    break
+                except queue.Full:
+                    if cancelled():
+                        return
             shared["media_queue_backpressure_ms"] += (time.perf_counter() - before) * 1000.0
             shared["max_media_queue_depth"] = max(shared["max_media_queue_depth"], media_q.qsize())
 
         def schedule_unit(text: str) -> None:
+            if cancelled():
+                return
             task = units.put(text)
             if task is None:
                 return
@@ -172,6 +195,8 @@ class V10MediaPipeline:
                     top_p=self.settings.llm_top_p,
                     max_tokens=self.settings.llm_max_tokens,
                 ):
+                    if cancelled():
+                        break
                     if event["type"] == "delta":
                         delta = str(event.get("content") or "")
                         if first_ttft is None:
@@ -220,8 +245,11 @@ class V10MediaPipeline:
                 ),
             )
             try:
-                while not cancel.is_set():
-                    item = speech_spool.get()
+                while not cancelled():
+                    try:
+                        item = speech_spool.get(timeout=0.05)
+                    except queue.Empty:
+                        continue
                     if item is _SPOOL_DONE:
                         for unit in chunker.flush():
                             schedule_unit(unit)
@@ -241,6 +269,8 @@ class V10MediaPipeline:
                 while True:
                     task = units.get()
                     if task is None:
+                        break
+                    if cancelled():
                         break
                     assert isinstance(task, SpeechUnitTask)
                     tts_started_ms = rel_ms()
@@ -267,6 +297,8 @@ class V10MediaPipeline:
                         trace_id=trace_id,
                         unit_index=task.index,
                     ):
+                        if cancelled():
+                            break
                         if tts_event.get("type") == "audio":
                             now_ms = rel_ms()
                             if first_pcm_ms is None:
@@ -330,6 +362,8 @@ class V10MediaPipeline:
                         elif tts_event.get("type") == "done":
                             terminal = dict(tts_event)
 
+                    if cancelled():
+                        break
                     finished_ms = rel_ms()
                     metric = {
                         "unit": task.index,
@@ -366,7 +400,18 @@ class V10MediaPipeline:
 
         media_source_done = False
         had_error = False
+        cancellation_announced = False
         while True:
+            if cancelled() and not cancellation_announced:
+                cancellation_announced = True
+                units.close()
+                speech_spool.put(_SPOOL_DONE)
+                while True:
+                    try:
+                        media_q.get_nowait()
+                    except queue.Empty:
+                        break
+                yield {"type": "cancelled", "stage": "pipeline", "at_ms": rel_ms()}
             progressed = False
             for _ in range(128):
                 try:
@@ -387,7 +432,7 @@ class V10MediaPipeline:
                     media = "__empty__"
                 if media is None:
                     media_source_done = True
-                elif media != "__empty__":
+                elif media != "__empty__" and not cancelled():
                     media["pipeline_yield_ns"] = time.time_ns()
                     queue_wait_ms = (
                         media["pipeline_yield_ns"] - media["t3_media_enqueue_ns"]
@@ -413,7 +458,7 @@ class V10MediaPipeline:
             if not progressed:
                 time.sleep(0.002)
 
-        if had_error:
+        if had_error or cancelled():
             return
 
         final_audio_path = None
